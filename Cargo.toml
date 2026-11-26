@@ -9,7 +9,10 @@ members = [
 [workspace.package]
 version = "0.3.0"
 edition = "2024"
+rust-version = "1.92"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/Pheem49/FORGE"
+homepage = "https://github.com/Pheem49/FORGE"
 
 [workspace.dependencies]
 arboard = "3.7.0"
@@ -36,5 +39,5 @@ tokio = { version = "1.54.1", features = ["rt-multi-thread", "sync", "macros", "
 toml = "1.2.3"
 tray-icon = "0.27.0"
 ureq = "3.5.2"
-wry = { version = "0.58.1", features = ["devtools", "linux-body"] }
+wry = { version = "0.58.2", features = ["devtools", "linux-body"] }
 zip = { version = "9.8.2", default-features = false, features = ["deflate"] }

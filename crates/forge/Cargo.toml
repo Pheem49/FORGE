@@ -3,7 +3,13 @@ name = "forge-app"
 description = "Rust-first desktop application platform supporting OS WebView (WRY) and Chromium (CEF) behind a single deep interface."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "../../README.md"
+keywords = ["desktop", "gui", "webview", "cef", "chromium"]
+categories = ["gui", "web-programming"]
 
 [lib]
 name = "forge"

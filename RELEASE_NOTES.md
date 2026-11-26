@@ -4,51 +4,56 @@ All notable features, architectural milestones, and developer tooling updates fo
 
 ---
 
+## v0.3.0 — "Trustworthy & Shippable" (2026-11-26)
+
+FORGE v0.3 proves both runtimes (`webview` and real Chromium 156 `cef`) live end-to-end, enforces capability permissions by default, adds full desktop application features (multi-window, CEF Views API, system tray, native menus, single-instance lock, window-state persistence), expands `forge build` into a cross-OS installer pipeline, and rounds out developer tooling (`forge doctor`, `forge bindings`, Vue 3 & Svelte 5 templates, 3-OS CI & release workflows).
+
+### Breaking Changes & Migration from v0.2
+1. **Strict Permissions by Default (`[permissions]`)**
+   - Omitting `[permissions]` in `forge.toml` now defaults to `mode = "enforce"` with an empty `allow = []` list (rejecting unlisted commands with HTTP `403` `FORGE_PERMISSION_DENIED`).
+   - **Migration:** Run `forge permissions init` to auto-generate a strict `[permissions]` block from your registered commands, or explicitly opt out during prototyping with `allow = ["*"]` / `mode = "permissive"`.
+2. **Cargo Package Renamed to `forge-app` (`[lib] name = "forge"`)**
+   - Rust `use forge::*` imports are unchanged; in external `Cargo.toml` manifests declare `forge = { package = "forge-app", version = "0.3", default-features = false }`.
+3. **`ForgeError::bad_request` HTTP Status Fix**
+   - `ForgeError::bad_request(...)` now returns HTTP `400 Bad Request` (`ErrorKind::BadRequest`) instead of `422`; wire JSON `{ code, message, details }` is unchanged.
+
+### Highlights
+- **Live-Verified Chromium 156 (`CefHost` Views API) & 3-OS CI**
+  - Rewrote `CefHost` onto CEF's native **Views API** (`window_create_top_level` + `browser_view_create` + `ForgeWindowDelegate`), enabling real `maximize`, `minimize`, `restore`, `set_fullscreen`, `set_size`, `set_position`, `show`, `hide`, and multi-window on Chromium.
+  - Unified custom-scheme authority onto `forge://localhost` (`https://forge.localhost` on Windows WebView2) and configured CEF `DISPLAY_ISOLATED | STANDARD | SECURE | CORS_ENABLED | FETCH_ENABLED` scheme options.
+  - Added `FORGE_SMOKE_TEST=1` (`__forge_ready` IPC round-trip + 30s watchdog) and `.github/workflows/ci.yml` (`ubuntu-24.04`, `windows-latest`, `macos-latest` + Linux `xvfb-run` live window smoke test + template build matrix).
+- **Multi-Window, System Tray, Menus, Single-Instance & Window State**
+  - Added `AppHandle` (`create_window`, `window`, `windows`, `emit_all`, `emit_to`, `set_tray`, `set_menu`, `quit`), `WindowOptions`, `[windows.<label>]`, built-in `window.*` & `event.*` IPC namespaces, and `window.forge.window` / `emit` / `emitTo` in JS.
+  - Added opt-in `desktop-ui` feature (`tray-icon` + `muda`) supporting declarative `[tray]` and `[menu]` with native `forge.*` actions (`forge.quit`, `forge.show-main`, etc.) and headless test hooks (`HeadlessApp::click_menu`, `click_tray`).
+  - Added `[app] single_instance = true` (`fd-lock` + authenticated loopback CLI argument forwarding via `app:second-instance`) and `[window] remember_state = true` (sandboxed `window-state.json` persistence with multi-monitor coordinate clamping).
+- **Capability Permission System (`forge::kernel::permissions` & `forge permissions init`)**
+  - Single-choke-point IPC enforcement supporting exact names, `namespace.*`, `*`, `deny` precedence, per-window `[permissions.windows.<label>]` overrides, and startup typo validation.
+  - Added `FORGE_EXPORT_COMMANDS=<path>` and `forge permissions init`.
+- **Cross-OS Bundler (`BundleTarget` Seam, Icon Pipeline & `SHA256SUMS`)**
+  - Refactored `forge-cli` packaging into `bundle/` (`StagedApp` + `BundleTarget` trait) supporting `deb`, `appimage`, `tarball`, `nsis`, `zip`, `app`, and `dmg`, plus deterministic `SHA256SUMS` in `dist/`.
+  - Added automatic icon pipeline (`icons.rs`) generating `.svg`, `128`/`256`/`512` `.png`, Windows `.ico`, and Apple `.icns` from a single source icon or FORGE's built-in badge.
+- **Developer Experience & Deepened Architecture**
+  - Added `forge bindings` (`.d.ts` generator with `ForgeCommandName` union + augmentable `ForgeCommandTypes`), `forge doctor` (environment diagnostics), and `--template vue` (Vue 3 + Vite + TS) & `--template svelte` (Svelte 5 + Vite + TS).
+  - Split `kernel.rs` into focused private submodules (`kernel/{mod,assets,bootstrap,ipc,permissions,builtins,devtools,http}`), unified `forge::manifest::Manifest` across both crates, typed `ErrorKind`, and added `.github/workflows/release.yml`.
+
+---
+
 ## v0.2.0 — "From Dev Loop to Distributable App" (2026-11-26)
 
 FORGE v0.2 transforms the core dual-runtime framework into an end-to-end Rust desktop application builder with live reloading, React/Vite support, bidirectional push events, single-binary packaging, and built-in native plugins.
 
 ### Highlights
 - **Bidirectional Rust → JS Push Events**
-  - Added `WindowHandle::emit(event, payload)` and `SetupContext::window()` in Rust so command handlers and background Tokio tasks can stream real-time events to JavaScript.
-  - Added `window.forge.listen(event, handler)` and `window.forge.once(event, handler)` to `/__forge/bootstrap.js`.
-  - Early events emitted during `.setup(...)` are buffered and drained automatically on `DOMContentLoaded`.
-- **Extended Window Controls**
-  - Added `set_size`, `set_minimized`, `set_maximized`, `set_fullscreen`, `drag_window`, and `[window].decorations` in `forge.toml`.
-- **Live Dev Workflow (`Hot Reload` & Vite/React HMR)**
-  - Built-in debounced `notify` file watcher (`FORGE_DEV_WATCH=1`): `.css` edits hot-swap stylesheets in-place without losing UI state (`__forge:css-reload`), while `.html`/`.js` edits trigger automatic reload (`__forge:reload`).
-  - Added `[dev]` configuration (`url`, `before_dev_command`, `before_build_command`) to proxy external frontend dev servers (Vite/React/Vue) cleanly under Same-Origin `forge://app/`.
-  - Added `--template react` (Vite + React 19 + TypeScript with typed `src-ui/forge.d.ts`) to `forge new`.
-- **Single-Binary Asset Embedding & Desktop Bundler (`forge build`)**
-  - Added zero-boilerplate compile-time embedding (`crates/forge/build.rs`): `forge build` compresses `ui/` into `.tar.gz` and bakes both `ui/` and `forge.toml` directly into the release executable with zero `build.rs` or proc-macros in user projects.
-  - Added `forge build [--runtime webview|cef] [--format all|bin|tarball|deb]` producing stripped standalone executables, portable `.tar.gz` bundles (with Linux `patchelf --set-rpath '$ORIGIN'` for Chromium/CEF), and Debian/Ubuntu `.deb` packages (`.desktop` entry + SVG icon).
+  - Added `WindowHandle::emit(event, payload)` and `SetupContext::window()` in Rust paired with `window.forge.listen` / `once` in JS, buffering early `.setup(...)` events until `DOMContentLoaded`.
+- **Extended Window Controls & Live Dev Workflow**
+  - Added `set_size`, `set_minimized`, `set_maximized`, `set_fullscreen`, `drag_window`, debounced `notify` CSS/HTML Hot Reload (`FORGE_DEV_WATCH=1`), `[dev]` Vite proxy, and `--template react`.
+- **Single-Binary Asset Embedding & Initial Linux Bundler**
+  - Zero-boilerplate `FORGE_EMBED_ARCHIVE` + `FORGE_EMBED_MANIFEST` compile-time embedding and initial `.tar.gz` / `.deb` packaging.
 - **Standard Native Desktop Plugins (`forge::plugins`)**
-  - `DialogPlugin` (`dialog.open`, `dialog.save`, `dialog.confirm`) backed by async `rfd` + mock test seam.
-  - `ClipboardPlugin` (`clipboard.read_text`, `clipboard.write_text`) backed by `arboard` + in-memory test seam.
-  - `NotificationPlugin` (`notification.send`) backed by `notify-rust` + recording test seam.
-  - `AppFsPlugin` (`fs.read_text`, `fs.write_text`, `fs.list_dir`, `fs.remove_file`) strictly confined inside `<data_dir>/<app.identifier>/` with pre-mkdir canonical ancestor symlink checks.
-- **Upgraded Reference Workbench (`examples/hello-forge`)**
-  - Showcases live 2-second Rust heartbeat push events, window maximize/restore controls, clipboard copy, and persistent sandboxed notes.
+  - `DialogPlugin`, `ClipboardPlugin`, `NotificationPlugin`, and sandboxed `AppFsPlugin`.
 
 ---
 
 ## v0.1.0 — "Write Once. Choose Your Runtime." (2026-11-26)
 
-Initial MVP establishing FORGE's 2-crate deep-module architecture (`crates/forge` + `crates/forge-cli`) and runtime portability between OS System WebViews and Chromium.
-
-### Highlights
-- **Core Rust Desktop Module (`crates/forge`)**
-  - Single-source declarative configuration via `forge.toml` (`[app]`, `[window]`, `[runtime]`) with `FORGE_*` environment overrides and programmatic `App::configure(...)`.
-  - Zero-macro async command registration (`App::command`) using sealed `FromContext` extractors (`State<T>`, `WindowHandle`, `AppConfig`) disjoint from `DeserializeOwned` payloads, with startup `TypeId` verification for missing state.
-  - Subprocess-safe `App::setup(...)` hook and automatic Phase 1 subprocess gate (`runtime::enter_process`) preventing Chromium helper processes (`--type=renderer`, `--type=gpu-process`) from triggering duplicate host side effects.
-  - Panic containment (`catch_unwind`) on async handlers so panics return structured `FORGE_HANDLER_PANIC` responses instead of unwinding across C/C++ FFI.
-- **Unified Custom-Scheme Exchange (`forge://app/...`)**
-  - Serves static UI assets (`/` → `/index.html`) with strict path traversal & symlink escape rejection (`403 Forbidden`), MIME detection, `Content-Security-Policy`, and automatic `<script src="/__forge/bootstrap.js"></script>` injection.
-  - Routes `window.forge.invoke(cmd, payload)` over Same-Origin `POST /__forge_ipc/<cmd>` authenticated by a random per-launch 256-bit `X-Forge-Token` and `Sec-Fetch-Site` validation.
-- **Dual Desktop Runtime Adapters & Headless Testing**
-  - `WebViewHost`: OS System WebView adapter (`tao` + `wry` with `devtools` and `linux-body`).
-  - `CefHost`: Chromium adapter (`cef-rs`) using `CefSchemeHandlerFactory` + `CefResourceHandler` in the browser process with zero custom renderer V8 FFI glue.
-  - `HeadlessApp` (`App::headless()`): Sub-5ms zero-GUI test harness verifying assets, CSRF security, and async commands inside `cargo test`.
-- **Developer CLI (`crates/forge-cli`) & Vanilla Template**
-  - `forge new <dir>` scaffolding `templates/vanilla` (`Cargo.toml`, `forge.toml`, `src/main.rs`, `ui/`).
-  - `forge dev [--runtime webview|cef]` with automated CEF binary caching (`~/.cache/forge/cef`) via `download-cef` and dynamic library search path configuration.
+Initial MVP establishing FORGE's 2-crate deep-module architecture (`crates/forge` + `crates/forge-cli`) and runtime portability between OS System WebViews (`tao` + `wry`) and Chromium (`cef-rs`), plus `HeadlessApp` zero-GUI testing.
