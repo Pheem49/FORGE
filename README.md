@@ -2,66 +2,106 @@
 
 **Write once. Choose your runtime. Ship anywhere.**
 
-FORGE is a Rust-first desktop application platform that lets you write a single Rust + Web UI codebase (Vanilla HTML/CSS/JS or React/Vite) and run or package it seamlessly on either the lightweight **OS System WebView** (`tao` + `wry`) or **Chromium** (`cef-rs`) with **zero code changes**.
+![FORGE Workbench](docs/assets/forge-workbench.png)
 
 ---
 
-## Features (`v0.2`)
+## What is FORGE?
 
-- **Dual Runtime Engine (`webview` & `cef`)**: Instant, tiny ~5 MB builds with OS System WebViews (`WebKitGTK` / `WebView2` / `WKWebView`), or pixel-identical rendering across every OS with Chromium (`CEF`).
-- **Zero-Macro Rust Handlers**: Standard `async fn` handlers with sealed `FromContext` extractors (`State<T>`, `WindowHandle`, `AppConfig`) and startup `TypeId` verification.
-- **Bidirectional IPC + Push Events**:
-  - **JS → Rust**: `await window.forge.invoke(cmd, payload)` over a unified Same-Origin `forge://app/` exchange protected by a per-launch 256-bit `X-Forge-Token`.
-  - **Rust → JS**: `window.emit(event, payload)` paired with `window.forge.listen(event, fn)` and `window.forge.once(event, fn)`.
-- **Live Dev Workflow (`Hot Reload` & Vite/React HMR)**:
-  - In-place CSS hot-swap and automatic HTML/JS reload on save during `forge dev`.
-  - Native `[dev].url` proxy & `before_dev_command` lifecycle for Vite / React / Vue HMR (`forge new my-app --template react`).
-- **Single-Binary Asset Embedding & Desktop Bundler (`forge build`)**:
-  - Automatically compresses and embeds `ui/` into the release binary with zero `build.rs` or proc-macros in user projects.
-  - Generates standalone executables, portable `.tar.gz` bundles (with `$ORIGIN` rpath patching for CEF), and Debian/Ubuntu `.deb` installers (`dpkg-deb`).
-- **Standard Native Desktop Plugins (`forge::plugins`)**:
-  - `DialogPlugin` (`dialog.open`, `dialog.save`, `dialog.confirm`)
-  - `ClipboardPlugin` (`clipboard.read_text`, `clipboard.write_text`)
-  - `NotificationPlugin` (`notification.send`)
-  - `AppFsPlugin` (`fs.read_text`, `fs.write_text`, `fs.list_dir`, `fs.remove_file` — confined inside `<data_dir>/<app.identifier>/`)
-- **Sub-5ms Headless Testing (`App::headless()`)**: Exercise static/embedded assets, CSRF guards, async commands, push events, and mockable native plugins inside `cargo test` with no display server.
+**FORGE** is a Rust-first desktop application platform and builder. It lets you build cross-platform desktop apps using **Rust** for application logic and **HTML/CSS/JS** (or **React + Vite**) for the UI—then switch between the lightweight **OS System WebView** (`WRY`) and **Chromium** (`CEF`) without changing a single line of application code.
 
 ---
 
-## Quick Start
+## Why FORGE?
 
-### 1. Run the Reference Workbench (`Hot Reload` Enabled)
+| | System WebView (`--runtime webview`) | Chromium (`--runtime cef`) |
+| :--- | :--- | :--- |
+| **Engine** | WebKitGTK / WebView2 / WKWebView | Embedded Chromium (CEF) |
+| **Rendering** | Native OS WebView | Identical across Linux, Windows & macOS |
+| **Bundle Size** | ~2–6 MB standalone / `.deb` | Self-contained Chromium bundle |
+| **Code Changes** | None | None |
+
+* **Zero Macros, Plain Rust:** Write standard `async fn` handlers with `State<T>` and `WindowHandle` extractors—fast compile times and full IDE autocomplete.
+* **Built-in Security:** Same-Origin `forge://app/` protocol, random 256-bit per-launch `X-Forge-Token` CSRF protection, strict CSP, and symlink-safe asset/storage sandboxing.
+* **Sub-5ms Automated Testing:** Test your entire app (`App::headless()`) in `cargo test` without opening a GUI window or display server.
+* **Zero-Boilerplate Single Binary:** `forge build` embeds both `ui/` and `forge.toml` directly into your release executable automatically.
+
+---
+
+## What It Can Do
+
+* **Dual Desktop Runtimes:** Switch between `webview` and `cef` via a single CLI flag (with automatic CEF binary caching).
+* **Two-Way Rust ↔ Frontend Bridge:** Call Rust with `await window.forge.invoke(cmd, payload)` and push live events from Rust with `window.emit(...)` → `window.forge.listen(...)`.
+* **Live Reload & Vite/React HMR:** Instant in-place CSS hot-swap, automatic HTML/JS reload, and built-in React + Vite + TypeScript scaffolding.
+* **Application Bundler (`forge build`):** Package standalone executables, portable `.tar.gz` archives, and Debian/Ubuntu `.deb` installers with desktop icons.
+* **Native Desktop Plugins (`forge::plugins`):** Ready-to-use File Dialogs, Clipboard, OS Notifications, and sandboxed App Storage.
+
+---
+
+## How to Use
+
+### 1. Create a New Project
 
 ```bash
-# Run on OS System WebView:
+# Vanilla HTML/CSS/JS + Rust
+cargo run -p forge-cli -- new my-app
+
+# React + Vite + TypeScript + Rust
+cargo run -p forge-cli -- new my-react-app --template react
+```
+
+### 2. Write Rust Commands & Call Them from JS
+
+**`src/main.rs`**
+```rust
+use forge::{App, ForgeError};
+use serde::{Deserialize, Serialize};
+
+#[derive(Deserialize)]
+struct GreetReq { name: String }
+
+#[derive(Serialize)]
+struct GreetRes { message: String }
+
+async fn greet(req: GreetReq) -> Result<GreetRes, ForgeError> {
+    Ok(GreetRes {
+        message: format!("Hello, {}!", req.name),
+    })
+}
+
+fn main() -> forge::Result<()> {
+    App::new().command("greet", greet).run()
+}
+```
+
+**`ui/main.js`**
+```javascript
+const res = await window.forge.invoke("greet", { name: "Pheem" });
+console.log(res.message);
+```
+
+### 3. Run in Live Dev Mode
+
+```bash
+# Run on OS System WebView (with Hot Reload)
 cargo run -p forge-cli -- dev --manifest-path examples/hello-forge/forge.toml --runtime webview
 
-# Switch the exact same app to Chromium (CEF):
+# Switch the exact same app to Chromium (CEF)
 cargo run -p forge-cli -- dev --manifest-path examples/hello-forge/forge.toml --runtime cef
 ```
 
-### 2. Package a Distributable Binary & `.deb` Installer
+### 4. Build & Package for Distribution
 
 ```bash
 cargo run -p forge-cli -- build --manifest-path examples/hello-forge/forge.toml --runtime webview
 ```
-Outputs are written to `examples/hello-forge/dist/`:
-- `dist/hello-forge/hello-forge` (standalone single-file executable with UI assets embedded inside!)
-- `dist/hello-forge-0.2.0-linux-x86_64.tar.gz`
-- `dist/hello-forge_0.2.0_amd64.deb`
 
-### 3. Scaffold a New Project (`vanilla` or `react`)
+Outputs are generated in `dist/` (standalone executable, `.tar.gz`, and `.deb` installer).
 
-```bash
-# Vanilla HTML/CSS/JS + Rust:
-cargo run -p forge-cli -- new my-app
+---
 
-# React + Vite + TypeScript + Rust:
-cargo run -p forge-cli -- new my-react-app --template react
-```
+## Documentation
 
-### 4. Run the Automated Test Suite
-
-```bash
-cargo test --workspace
-```
+* [Release Notes](RELEASE_NOTES.md)
+* [Architecture Guide](docs/architecture.md)
+* [Contributor & Agent Guide](AGENTS.md)
