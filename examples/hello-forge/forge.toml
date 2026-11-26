@@ -1,7 +1,7 @@
 [app]
 name = "hello-forge"
-version = "0.2.0"
-description = "FORGE v0.2 Runtime, Live Event & Plugin Workbench"
+version = "0.3.0"
+description = "FORGE v0.3 Multi-Window, Capability-Protected & Dual-Engine Workbench"
 identifier = "dev.forge.hello"
 assets = "ui"
 
@@ -17,3 +17,16 @@ devtools = true
 
 [runtime]
 default = "webview"
+
+[permissions]
+mode = "enforce"
+allow = [
+  "host.status",
+  "bench.*",
+  "dialog.*",
+  "clipboard.*",
+  "notification.*",
+  "fs.*",
+  "window.*",
+  "event.*",
+]

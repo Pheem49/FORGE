@@ -10,8 +10,9 @@ use tar::Archive;
 
 use crate::error::{Error, Result};
 pub use crate::manifest::{
-    AppMetaConfig, DevConfig, Manifest, MenuConfig, MenuItemConfig, RuntimeConfig, RuntimeKind,
-    SubmenuConfig, TrayConfig, WindowConfig,
+    AppMetaConfig, DevConfig, ExportedCommand, Manifest, MenuConfig, MenuItemConfig,
+    PermissionMode, PermissionsConfig, RuntimeConfig, RuntimeKind, SubmenuConfig, TrayConfig,
+    WindowConfig, WindowPermissionOverride,
 };
 
 /// Resolved configuration for a FORGE application.
@@ -23,6 +24,7 @@ pub struct Config {
     pub windows: BTreeMap<String, WindowConfig>,
     pub runtime: RuntimeConfig,
     pub dev: DevConfig,
+    pub permissions: PermissionsConfig,
     pub tray: Option<TrayConfig>,
     pub menu: Option<MenuConfig>,
     #[serde(skip)]
@@ -39,6 +41,7 @@ impl From<Manifest> for Config {
             windows: m.windows,
             runtime: m.runtime,
             dev: m.dev,
+            permissions: m.permissions,
             tray: m.tray,
             menu: m.menu,
             in_memory_assets: None,

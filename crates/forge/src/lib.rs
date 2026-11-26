@@ -14,8 +14,9 @@ pub use http;
 pub use tokio;
 
 pub use config::{
-    AppConfig, AppMetaConfig, Config, DevConfig, Manifest, MenuConfig, MenuItemConfig,
-    RuntimeConfig, RuntimeKind, SubmenuConfig, TrayConfig, WindowConfig,
+    AppConfig, AppMetaConfig, Config, DevConfig, ExportedCommand, Manifest, MenuConfig,
+    MenuItemConfig, PermissionMode, PermissionsConfig, RuntimeConfig, RuntimeKind, SubmenuConfig,
+    TrayConfig, WindowConfig, WindowPermissionOverride,
 };
 pub use error::{Error, ErrorKind, ForgeError, Result, codes};
 pub use handler::{CommandHandler, FromContext, State};
@@ -158,6 +159,12 @@ impl App {
     }
 
     pub fn run(self) -> Result<()> {
+        if let Some(export_path) = export_commands_env_path() {
+            let exported = self.export_commands()?;
+            write_exported_commands(&export_path, &exported)?;
+            return Ok(());
+        }
+
         let early_kind = Config::peek_runtime_kind(&self.root_dir);
         if let ProcessDisposition::SubprocessExited(_code) = runtime::enter_process(early_kind)? {
             return Ok(());
@@ -220,6 +227,12 @@ impl App {
     }
 
     pub fn headless(self) -> Result<HeadlessApp> {
+        let export_path = export_commands_env_path();
+        if let Some(path) = &export_path {
+            let exported = self.collect_exported_commands();
+            write_exported_commands(path, &exported)?;
+        }
+
         let (handle, owned_rt) = match tokio::runtime::Handle::try_current() {
             Ok(h) => (h, None),
             Err(_) => {
@@ -229,6 +242,43 @@ impl App {
         };
         let (kernel, commands_rx) = self.build_kernel(handle)?;
         Ok(HeadlessApp::new(kernel, commands_rx, owned_rt))
+    }
+
+    /// Returns the sorted list of registered commands (both user/plugin commands and built-ins)
+    /// without starting a Tokio runtime or opening any native window.
+    pub fn export_commands(&self) -> Result<Vec<ExportedCommand>> {
+        for &(name, _) in &self.commands {
+            if name.trim().is_empty()
+                || name.starts_with("__forge")
+                || name.contains('/')
+                || name.contains('\0')
+            {
+                return Err(Error::ReservedCommand { command: name });
+            }
+        }
+        Ok(self.collect_exported_commands())
+    }
+
+    fn collect_exported_commands(&self) -> Vec<ExportedCommand> {
+        let mut user_set = std::collections::HashSet::with_capacity(self.commands.len());
+        for &(name, _) in &self.commands {
+            user_set.insert(name);
+        }
+        let mut full_map: HashMap<&'static str, Arc<dyn ErasedCommand>> = HashMap::new();
+        for &(name, ref cmd) in &self.commands {
+            full_map.insert(name, Arc::clone(cmd));
+        }
+        kernel::builtins::insert_builtin_commands(&mut full_map);
+
+        let mut list: Vec<ExportedCommand> = full_map
+            .keys()
+            .map(|&name| ExportedCommand {
+                name: name.to_string(),
+                builtin: !user_set.contains(name),
+            })
+            .collect();
+        list.sort_by(|a, b| a.name.cmp(&b.name));
+        list
     }
 
     fn build_kernel(
@@ -243,6 +293,7 @@ impl App {
             hook(&mut config);
         }
 
+        let mut user_command_names: Vec<&'static str> = Vec::with_capacity(self.commands.len());
         let mut command_map: HashMap<&'static str, Arc<dyn ErasedCommand>> =
             HashMap::with_capacity(self.commands.len() + 16);
         for (name, cmd) in self.commands {
@@ -256,8 +307,16 @@ impl App {
             if command_map.insert(name, cmd).is_some() {
                 return Err(Error::DuplicateCommand { command: name });
             }
+            user_command_names.push(name);
         }
         kernel::builtins::insert_builtin_commands(&mut command_map);
+
+        let all_registered: Vec<&str> = command_map.keys().copied().collect();
+        let permissions = kernel::permissions::PermissionPolicy::compile(&config.permissions)?;
+        let permission_warnings = permissions.validate(&all_registered, &user_command_names)?;
+        for warn in &permission_warnings {
+            eprintln!("[FORGE] warning: {warn}");
+        }
 
         let (registry, commands_rx) = WindowRegistry::new(&config);
         let app_handle = AppHandle::new(Arc::clone(&registry));
@@ -305,12 +364,42 @@ impl App {
             config,
             states,
             command_map,
+            permissions,
+            permission_warnings,
             registry,
             tokio_handle,
         )?;
 
         Ok((Arc::new(kernel), commands_rx))
     }
+}
+
+fn export_commands_env_path() -> Option<PathBuf> {
+    std::env::var("FORGE_EXPORT_COMMANDS")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .map(PathBuf::from)
+}
+
+fn write_exported_commands(dest: &PathBuf, commands: &[ExportedCommand]) -> Result<()> {
+    if let Some(parent) = dest.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            Error::Runtime(format!(
+                "failed to create FORGE_EXPORT_COMMANDS parent directory '{}': {e}",
+                parent.display()
+            ))
+        })?;
+    }
+    let json = serde_json::to_vec_pretty(commands)
+        .map_err(|e| Error::Runtime(format!("failed to serialize exported commands: {e}")))?;
+    std::fs::write(dest, json).map_err(|e| {
+        Error::Runtime(format!(
+            "failed to write FORGE_EXPORT_COMMANDS to '{}': {e}",
+            dest.display()
+        ))
+    })
 }
 
 fn build_tokio_runtime() -> Result<tokio::runtime::Runtime> {

@@ -86,6 +86,10 @@ assets = "ui"
 title = "Forge Notes"
 width = 900
 height = 600
+
+[permissions]
+mode = "enforce"
+allow = ["counter.*", "window.*", "debug.panic"]
 "#,
     )
     .unwrap();
@@ -143,6 +147,7 @@ async fn executes_concurrent_commands_enforces_csrf_and_contains_panics() {
     let app = App::new()
         .configure(|cfg| {
             cfg.window.title = "Memory App".into();
+            cfg.permissions.allow_all();
             cfg.with_memory_asset("/index.html", b"<!doctype html><h1>Mem</h1>".to_vec());
         })
         .plugin(CounterPlugin)

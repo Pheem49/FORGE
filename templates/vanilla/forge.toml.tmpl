@@ -1,5 +1,6 @@
 [app]
 name = "{{APP_NAME}}"
+version = "0.1.0"
 identifier = "dev.forge.{{APP_SLUG}}"
 assets = "ui"
 
@@ -12,3 +13,11 @@ devtools = true
 
 [runtime]
 default = "{{DEFAULT_RUNTIME}}"
+
+[permissions]
+mode = "enforce"
+allow = [
+  "greet",
+  "window.*",
+  "event.*",
+]

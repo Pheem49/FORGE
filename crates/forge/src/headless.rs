@@ -57,6 +57,11 @@ impl HeadlessApp {
         &self.kernel.config
     }
 
+    /// Returns any non-fatal permission diagnostics emitted during startup validation.
+    pub fn permission_warnings(&self) -> &[String] {
+        &self.kernel.permission_warnings
+    }
+
     /// Returns an [`AppHandle`] bound to this headless instance.
     pub fn app_handle(&self) -> AppHandle {
         AppHandle::new(Arc::clone(&self.kernel.registry))

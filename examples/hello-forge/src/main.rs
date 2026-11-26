@@ -192,7 +192,7 @@ mod tests {
 
         let status: HostStatus = app.invoke_unit("host.status").await.unwrap();
         assert_eq!(status.app_name, "hello-forge");
-        assert_eq!(status.version, "0.2.0");
+        assert_eq!(status.version, "0.3.0");
 
         let out: GreetOutput = app
             .invoke("bench.greet", json!({ "name": "Pheem" }))

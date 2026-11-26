@@ -5,7 +5,8 @@ use forge_cli::build::{BuildOptions, run_build};
 use forge_cli::cef_provisioner::CachedCefProvisioner;
 use forge_cli::dev::{DevOptions, OsProcessRunner, run_dev};
 use forge_cli::new::{NewOptions, create_project};
-use forge_cli::{Cli, Commands, TemplateChoice};
+use forge_cli::permissions::{PermissionsInitOptions, run_permissions_init};
+use forge_cli::{Cli, Commands, PermissionsAction, TemplateChoice};
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -77,6 +78,32 @@ fn main() -> ExitCode {
                 }
             })
         }
+        Commands::Permissions { action } => match action {
+            PermissionsAction::Init {
+                manifest_path,
+                runtime,
+            } => {
+                let provisioner = CachedCefProvisioner::default();
+                let runner = OsProcessRunner;
+                run_permissions_init(
+                    &PermissionsInitOptions {
+                        manifest_path,
+                        runtime_override: runtime,
+                    },
+                    &provisioner,
+                    &runner,
+                )
+                .map(|allowed| {
+                    println!(
+                        "Updated [permissions] in forge.toml ({} allowed entries):",
+                        allowed.len()
+                    );
+                    for entry in allowed {
+                        println!("  - {entry}");
+                    }
+                })
+            }
+        },
     };
 
     match outcome {

@@ -5,6 +5,7 @@ pub(crate) mod builtins;
 mod devtools;
 pub(crate) mod http;
 mod ipc;
+pub(crate) mod permissions;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -15,6 +16,7 @@ use ::http::StatusCode;
 #[cfg(any(feature = "webview", feature = "cef"))]
 use tokio::task::AbortHandle;
 
+use self::permissions::PermissionPolicy;
 use crate::config::{Config, unpack_tar_gz_assets};
 use crate::error::{Error, Result};
 use crate::handler::{ErasedCommand, StateMap};
@@ -29,6 +31,8 @@ pub(crate) struct ForgeKernel {
     pub(crate) canonical_assets_root: Option<PathBuf>,
     pub(crate) states: Arc<StateMap>,
     pub(crate) commands: HashMap<&'static str, Arc<dyn ErasedCommand>>,
+    pub(crate) permissions: PermissionPolicy,
+    pub(crate) permission_warnings: Vec<String>,
     pub(crate) launch_token: String,
     pub(crate) registry: Arc<WindowRegistry>,
     #[allow(dead_code)]
@@ -40,11 +44,14 @@ pub(crate) struct ForgeKernel {
 }
 
 impl ForgeKernel {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         root_dir: &Path,
         mut config: Config,
         states: StateMap,
         commands: HashMap<&'static str, Arc<dyn ErasedCommand>>,
+        permissions: PermissionPolicy,
+        permission_warnings: Vec<String>,
         registry: Arc<WindowRegistry>,
         tokio_handle: tokio::runtime::Handle,
     ) -> Result<Self> {
@@ -132,6 +139,8 @@ impl ForgeKernel {
             canonical_assets_root,
             states: Arc::new(states),
             commands,
+            permissions,
+            permission_warnings,
             launch_token,
             registry,
             tokio_handle,

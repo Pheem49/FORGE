@@ -19,3 +19,15 @@ default = "{{DEFAULT_RUNTIME}}"
 url = "http://127.0.0.1:5173"
 before_dev_command = "npm run dev"
 before_build_command = "npm run build"
+
+[permissions]
+mode = "enforce"
+allow = [
+  "greet",
+  "dialog.*",
+  "clipboard.*",
+  "notification.*",
+  "fs.*",
+  "window.*",
+  "event.*",
+]

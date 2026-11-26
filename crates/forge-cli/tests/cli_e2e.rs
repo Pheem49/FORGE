@@ -7,6 +7,7 @@ use forge_cli::build::{BuildOptions, run_build};
 use forge_cli::cef_provisioner::CefProvisioner;
 use forge_cli::dev::{CommandSpec, DevOptions, ProcessRunner, run_dev};
 use forge_cli::new::{NewOptions, create_project};
+use forge_cli::permissions::{PermissionsInitOptions, run_permissions_init};
 use forge_cli::{BundleFormat, Result, RuntimeChoice, TemplateChoice};
 
 struct StubCefProvisioner {
@@ -31,6 +32,16 @@ struct RecordingRunner {
 impl ProcessRunner for RecordingRunner {
     fn run(&self, spec: &CommandSpec) -> Result<i32> {
         self.recorded.borrow_mut().push(spec.clone());
+        if let Some(export_path) = spec.env.get("FORGE_EXPORT_COMMANDS") {
+            let p = PathBuf::from(export_path);
+            if let Some(parent) = p.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            let _ = fs::write(
+                p,
+                r#"[{"name":"greet","builtin":false},{"name":"fs.read_text","builtin":false},{"name":"window.close","builtin":true}]"#,
+            );
+        }
         if spec.program == "cargo"
             && spec.args.first().map(String::as_str) == Some("build")
             && let (Some(bin_name), Some(target_dir)) =
@@ -214,4 +225,54 @@ fn builds_embedded_release_bundles_tarball_and_deb_packages() {
         let stdout = String::from_utf8_lossy(&info.stdout);
         assert!(stdout.contains("Package: packager-demo"));
     }
+}
+
+#[test]
+fn permissions_init_exports_commands_and_rewrites_forge_toml_allow_list() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_dir = temp.path().join("perm_demo");
+
+    create_project(&NewOptions {
+        target_dir: app_dir.clone(),
+        template: TemplateChoice::Vanilla,
+        runtime: RuntimeChoice::Webview,
+        forge_path: None,
+    })
+    .unwrap();
+
+    // Simulate a legacy v0.2 forge.toml missing `[permissions]`
+    fs::write(
+        app_dir.join("forge.toml"),
+        "[app]\nname = \"perm-demo\"\nassets = \"ui\"\n",
+    )
+    .unwrap();
+
+    let provisioner = StubCefProvisioner {
+        cef_dir: temp.path().to_path_buf(),
+        calls: RefCell::new(0),
+    };
+    let runner = RecordingRunner::default();
+
+    let allowed = run_permissions_init(
+        &PermissionsInitOptions {
+            manifest_path: Some(app_dir.join("forge.toml")),
+            runtime_override: None,
+        },
+        &provisioner,
+        &runner,
+    )
+    .expect("forge permissions init should succeed");
+
+    assert_eq!(
+        allowed,
+        vec![
+            "fs.read_text".to_string(),
+            "greet".to_string(),
+            "window.*".to_string(),
+            "event.*".to_string()
+        ]
+    );
+
+    let updated = forge::manifest::Manifest::load(&app_dir.join("forge.toml")).unwrap();
+    assert_eq!(updated.permissions.allow, allowed);
 }

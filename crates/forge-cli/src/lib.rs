@@ -2,6 +2,7 @@ pub mod build;
 pub mod cef_provisioner;
 pub mod dev;
 pub mod new;
+pub mod permissions;
 
 use std::fmt;
 use std::path::PathBuf;
@@ -145,5 +146,24 @@ pub enum Commands {
         /// Output directory for packaged artifacts (defaults to `<project>/dist`)
         #[arg(long)]
         out_dir: Option<PathBuf>,
+    },
+    /// Manage declarative `[permissions]` policies in `forge.toml`
+    Permissions {
+        #[command(subcommand)]
+        action: PermissionsAction,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum PermissionsAction {
+    /// Inspect registered commands and generate a strict `[permissions]` allow-list in `forge.toml`
+    Init {
+        /// Optional path to `forge.toml` (defaults to `./forge.toml`)
+        #[arg(long)]
+        manifest_path: Option<PathBuf>,
+
+        /// Override the runtime used while inspecting commands
+        #[arg(long, value_enum)]
+        runtime: Option<RuntimeChoice>,
     },
 }

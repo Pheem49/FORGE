@@ -210,6 +210,57 @@ pub struct MenuConfig {
     pub submenu: Vec<SubmenuConfig>,
 }
 
+/// Enforcement mode for `[permissions]` in `forge.toml`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum PermissionMode {
+    /// Default strict capability enforcement: commands not matched by `allow` are rejected with `403`.
+    #[default]
+    Enforce,
+    /// Development escape hatch: allows registered commands unless matched by `deny`.
+    Permissive,
+}
+
+/// Per-window capability override (`[permissions.windows.<label>]`), replacing global `allow` for that window.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WindowPermissionOverride {
+    pub allow: Vec<String>,
+    pub deny: Vec<String>,
+}
+
+/// Declarative command capability policy (`[permissions]` in `forge.toml`).
+/// Defaults to `mode = "enforce"` with an empty `allow` list (deny-by-default).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PermissionsConfig {
+    pub mode: PermissionMode,
+    pub allow: Vec<String>,
+    pub deny: Vec<String>,
+    pub windows: BTreeMap<String, WindowPermissionOverride>,
+}
+
+impl PermissionsConfig {
+    /// Convenience helper allowing all registered commands (`allow = ["*"]`).
+    pub fn allow_all(&mut self) -> &mut Self {
+        self.allow = vec!["*".to_string()];
+        self
+    }
+
+    /// Switches `[permissions]` into `permissive` mode.
+    pub fn set_permissive(&mut self) -> &mut Self {
+        self.mode = PermissionMode::Permissive;
+        self
+    }
+}
+
+/// Command metadata exported when `FORGE_EXPORT_COMMANDS=<path>` is set (used by `forge permissions init` and `forge bindings`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExportedCommand {
+    pub name: String,
+    pub builtin: bool,
+}
+
 /// Shared declarative `forge.toml` schema consumed by both the FORGE runtime and `forge-cli`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -219,6 +270,7 @@ pub struct Manifest {
     pub windows: BTreeMap<String, WindowConfig>,
     pub runtime: RuntimeConfig,
     pub dev: DevConfig,
+    pub permissions: PermissionsConfig,
     pub tray: Option<TrayConfig>,
     pub menu: Option<MenuConfig>,
 }

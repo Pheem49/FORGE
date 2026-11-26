@@ -99,6 +99,11 @@ impl ForgeKernel {
             );
         };
 
+        // Single permission choke point: evaluated for every command (user, plugin, and built-in).
+        if let Err(perm_err) = self.permissions.check(window.label(), &cmd_name) {
+            return json_error_response(perm_err.status_code(), &perm_err, csp);
+        }
+
         let Some(command) = self.commands.get(cmd_name.as_str()) else {
             return json_error_response(
                 StatusCode::NOT_FOUND,

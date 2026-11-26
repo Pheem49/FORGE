@@ -46,6 +46,7 @@ async fn supports_push_events_window_controls_and_embedded_tar_gz_assets() {
 
     let app = App::new()
         .configure(move |cfg| {
+            cfg.permissions.allow = vec!["run.job".into()];
             cfg.load_embedded_tar_gz(&archive)
                 .expect("embedded tar.gz should unpack");
         })
@@ -105,6 +106,13 @@ async fn standard_plugins_operate_and_enforce_sandbox_headlessly() {
 
     let app = App::new()
         .configure(|cfg| {
+            cfg.permissions.allow = vec![
+                "ping".into(),
+                "dialog.*".into(),
+                "clipboard.*".into(),
+                "notification.*".into(),
+                "fs.*".into(),
+            ];
             cfg.with_memory_asset("/index.html", b"<h1>Plugins</h1>".to_vec());
         })
         .plugin(DialogPlugin::mock(

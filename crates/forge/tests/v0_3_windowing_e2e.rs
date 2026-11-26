@@ -53,6 +53,10 @@ title = "Preferences"
 width = 520
 height = 420
 create_on_startup = false
+
+[permissions]
+mode = "enforce"
+allow = ["caller.info", "open.inspector", "window.*", "event.*"]
 "#,
     )
     .unwrap();
