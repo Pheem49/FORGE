@@ -10,7 +10,7 @@ webview = ["forge/webview", "forge/dev-tools", "forge/plugins"]
 cef = ["forge/cef", "forge/dev-tools", "forge/plugins"]
 
 [dependencies]
-forge = { path = "../../crates/forge", default-features = false, features = ["plugins"] }
+forge = { package = "forge-app", path = "../../crates/forge", default-features = false, features = ["plugins"] }
 serde.workspace = true
 serde_json.workspace = true
 

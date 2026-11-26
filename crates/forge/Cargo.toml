@@ -1,9 +1,13 @@
 [package]
-name = "forge"
+name = "forge-app"
 description = "Rust-first desktop application platform supporting OS WebView (WRY) and Chromium (CEF) behind a single deep interface."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+
+[lib]
+name = "forge"
+path = "src/lib.rs"
 
 [features]
 default = ["webview", "dev-tools"]

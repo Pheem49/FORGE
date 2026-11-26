@@ -14,6 +14,7 @@ clap.workspace = true
 dirs.workspace = true
 download-cef.workspace = true
 flate2.workspace = true
+forge = { package = "forge-app", path = "../forge", version = "0.3.0", default-features = false }
 serde.workspace = true
 tar.workspace = true
 toml.workspace = true

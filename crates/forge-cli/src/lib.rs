@@ -7,6 +7,7 @@ use std::fmt;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use forge::manifest::RuntimeKind;
 
 pub type Result<T, E = CliError> = std::result::Result<T, E>;
 
@@ -52,12 +53,13 @@ impl RuntimeChoice {
             Self::Cef => "cef",
         }
     }
+}
 
-    pub fn parse_manifest_str(raw: &str) -> Option<Self> {
-        match raw.trim().to_ascii_lowercase().as_str() {
-            "webview" | "wry" => Some(Self::Webview),
-            "cef" | "chromium" => Some(Self::Cef),
-            _ => None,
+impl From<RuntimeKind> for RuntimeChoice {
+    fn from(kind: RuntimeKind) -> Self {
+        match kind {
+            RuntimeKind::Webview => Self::Webview,
+            RuntimeKind::Cef => Self::Cef,
         }
     }
 }

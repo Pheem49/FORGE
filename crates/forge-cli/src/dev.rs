@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
+use forge::manifest::Manifest;
 use serde::Deserialize;
 
 use crate::cef_provisioner::CefProvisioner;
@@ -80,75 +81,6 @@ pub struct DevOptions {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
-pub(crate) struct PartialForgeManifest {
-    pub app: PartialAppSection,
-    pub window: PartialWindowSection,
-    pub runtime: PartialRuntimeSection,
-    pub dev: PartialDevSection,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(default)]
-pub(crate) struct PartialAppSection {
-    pub name: String,
-    pub version: String,
-    pub description: Option<String>,
-    pub identifier: String,
-    pub assets: PathBuf,
-    pub icon: Option<PathBuf>,
-}
-
-impl Default for PartialAppSection {
-    fn default() -> Self {
-        Self {
-            name: "forge-app".to_string(),
-            version: "0.1.0".to_string(),
-            description: None,
-            identifier: "dev.forge.app".to_string(),
-            assets: PathBuf::from("ui"),
-            icon: None,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(default)]
-pub(crate) struct PartialWindowSection {
-    pub title: String,
-}
-
-impl Default for PartialWindowSection {
-    fn default() -> Self {
-        Self {
-            title: "FORGE App".to_string(),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(default)]
-pub(crate) struct PartialRuntimeSection {
-    pub default: String,
-}
-
-impl Default for PartialRuntimeSection {
-    fn default() -> Self {
-        Self {
-            default: "webview".to_string(),
-        }
-    }
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-pub(crate) struct PartialDevSection {
-    pub url: Option<String>,
-    pub before_dev_command: Option<String>,
-    pub before_build_command: Option<String>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
 pub(crate) struct PartialCargoToml {
     pub package: Option<PartialCargoPackage>,
     #[serde(default)]
@@ -209,7 +141,7 @@ where
         }
     }
 
-    let active_runtime = resolve_runtime(&manifest_file, &parsed, opts.runtime_override)?;
+    let active_runtime = resolve_runtime(&parsed, opts.runtime_override);
 
     let cargo_toml_path = project_root.join("Cargo.toml");
     if !cargo_toml_path.is_file() {
@@ -284,9 +216,7 @@ where
     Ok(())
 }
 
-pub(crate) fn load_manifest(
-    manifest_opt: Option<&Path>,
-) -> Result<(PathBuf, PathBuf, PartialForgeManifest)> {
+pub(crate) fn load_manifest(manifest_opt: Option<&Path>) -> Result<(PathBuf, PathBuf, Manifest)> {
     let manifest_file = match manifest_opt {
         Some(p) => {
             if p.is_dir() {
@@ -319,36 +249,19 @@ pub(crate) fn load_manifest(
             message: "manifest has no parent directory".into(),
         })?;
 
-    let raw_manifest = fs::read_to_string(&manifest_file).map_err(|e| CliError::Io {
+    let parsed = Manifest::load(&manifest_file).map_err(|e| CliError::Manifest {
         path: manifest_file.clone(),
-        message: format!("failed to read file: {e}"),
+        message: e.to_string(),
     })?;
-    let parsed: PartialForgeManifest =
-        toml::from_str(&raw_manifest).map_err(|e| CliError::Manifest {
-            path: manifest_file.clone(),
-            message: e.to_string(),
-        })?;
 
     Ok((manifest_file, project_root, parsed))
 }
 
 pub(crate) fn resolve_runtime(
-    manifest_file: &Path,
-    parsed: &PartialForgeManifest,
+    parsed: &Manifest,
     override_choice: Option<RuntimeChoice>,
-) -> Result<RuntimeChoice> {
-    match override_choice {
-        Some(rt) => Ok(rt),
-        None => RuntimeChoice::parse_manifest_str(&parsed.runtime.default).ok_or_else(|| {
-            CliError::Manifest {
-                path: manifest_file.to_path_buf(),
-                message: format!(
-                    "unsupported [runtime].default '{}' (expected 'webview' or 'cef')",
-                    parsed.runtime.default
-                ),
-            }
-        }),
-    }
+) -> RuntimeChoice {
+    override_choice.unwrap_or_else(|| RuntimeChoice::from(parsed.runtime.default))
 }
 
 pub(crate) fn resolve_cargo_feature_args(

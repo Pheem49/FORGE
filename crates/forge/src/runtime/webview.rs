@@ -10,7 +10,19 @@ use wry::WebViewBuilder;
 
 use crate::error::{Error, Result};
 use crate::kernel::ForgeKernel;
-use crate::runtime::{HostDirective, ProtocolRequest, RuntimeHost};
+use crate::runtime::{HostDirective, ProtocolRequest, RuntimeHost, emit_script};
+
+fn entry_url(path: &str) -> String {
+    let clean = path.trim_start_matches('/');
+    #[cfg(target_os = "windows")]
+    {
+        format!("https://forge.localhost/{clean}")
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        format!("forge://localhost/{clean}")
+    }
+}
 
 pub(crate) struct WebViewHost;
 
@@ -77,7 +89,8 @@ impl RuntimeHost for WebViewHost {
             builder.with_https_scheme(true)
         };
 
-        let builder = builder.with_url("forge://localhost/index.html");
+        let url = entry_url("/index.html");
+        let builder = builder.with_url(&url);
 
         #[cfg(any(
             target_os = "windows",
@@ -144,10 +157,7 @@ impl RuntimeHost for WebViewHost {
                         event,
                         payload_json,
                     } => {
-                        if let Ok(event_js) = serde_json::to_string(&event) {
-                            let script = format!(
-                                "if (window.__forge_dispatch) {{ window.__forge_dispatch({event_js}, {payload_json}); }}"
-                            );
+                        if let Some(script) = emit_script(&event, &payload_json) {
                             let _ = webview.evaluate_script(&script);
                         }
                     }

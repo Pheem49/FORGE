@@ -40,7 +40,7 @@ jobs:
       - name: Run Headless & CLI E2E Tests
         run: cargo test --workspace
       - name: Type-check all feature combinations (WebView + CEF + Plugins)
-        run: cargo check -p forge --features webview,cef,cef/dox,plugins,dev-tools
+        run: cargo check -p forge-app --features webview,cef,cef/dox,plugins,dev-tools
 
   smoke-linux:
     name: Live Window Smoke Test (Linux Xvfb)

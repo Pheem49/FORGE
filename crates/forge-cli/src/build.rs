@@ -5,13 +5,13 @@ use std::process::Command;
 
 use flate2::Compression;
 use flate2::write::GzEncoder;
+use forge::manifest::Manifest;
 use tar::Builder;
 
 use crate::cef_provisioner::CefProvisioner;
 use crate::dev::{
-    CommandSpec, PartialCargoToml, PartialForgeManifest, ProcessRunner, inject_library_search_path,
-    load_manifest, parse_cargo_toml, resolve_cargo_feature_args, resolve_runtime,
-    shell_command_spec,
+    CommandSpec, PartialCargoToml, ProcessRunner, inject_library_search_path, load_manifest,
+    parse_cargo_toml, resolve_cargo_feature_args, resolve_runtime, shell_command_spec,
 };
 use crate::{BundleFormat, CliError, Result, RuntimeChoice};
 
@@ -46,7 +46,7 @@ where
     R: ProcessRunner,
 {
     let (manifest_file, project_root, parsed) = load_manifest(opts.manifest_path.as_deref())?;
-    let active_runtime = resolve_runtime(&manifest_file, &parsed, opts.runtime_override)?;
+    let active_runtime = resolve_runtime(&parsed, opts.runtime_override);
 
     let cargo_toml_path = project_root.join("Cargo.toml");
     if !cargo_toml_path.is_file() {
@@ -415,7 +415,7 @@ fn build_deb_package(
     dist_root: &Path,
     app_bundle_dir: &Path,
     bin_name: &str,
-    manifest: &PartialForgeManifest,
+    manifest: &Manifest,
     runtime: RuntimeChoice,
 ) -> Result<PathBuf> {
     let pkg_name = sanitize_deb_package_name(&manifest.app.name);

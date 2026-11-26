@@ -228,6 +228,15 @@ pub(crate) trait RuntimeHost {
     ) -> Result<()>;
 }
 
+#[cfg(any(feature = "webview", feature = "cef"))]
+pub(crate) fn emit_script(event: &str, payload_json: &str) -> Option<String> {
+    serde_json::to_string(event).ok().map(|event_js| {
+        format!(
+            "if (window.__forge_dispatch) {{ window.__forge_dispatch({event_js}, {payload_json}); }}"
+        )
+    })
+}
+
 pub(crate) fn enter_process(kind: RuntimeKind) -> Result<ProcessDisposition> {
     match kind {
         RuntimeKind::Webview => {

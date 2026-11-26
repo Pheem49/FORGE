@@ -1,10 +1,12 @@
 pub mod config;
-mod error;
+pub mod error;
 mod handler;
 mod headless;
 mod kernel;
+pub mod manifest;
 pub mod plugins;
 mod runtime;
+pub(crate) mod sandbox;
 
 pub use http;
 pub use tokio;
@@ -12,9 +14,10 @@ pub use tokio;
 pub use config::{
     AppConfig, AppMetaConfig, Config, DevConfig, RuntimeConfig, RuntimeKind, WindowConfig,
 };
-pub use error::{Error, ForgeError, Result};
+pub use error::{Error, ErrorKind, ForgeError, Result, codes};
 pub use handler::{CommandHandler, FromContext, State};
 pub use headless::{HeadlessApp, RawResponse};
+pub use manifest::Manifest;
 pub use runtime::WindowHandle;
 
 use std::collections::HashMap;

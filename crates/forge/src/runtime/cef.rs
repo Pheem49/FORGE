@@ -21,7 +21,7 @@ use tokio::task::AbortHandle;
 use crate::error::{Error, Result};
 use crate::kernel::ForgeKernel;
 use crate::runtime::{
-    HostDirective, ProcessDisposition, ProtocolRequest, ProtocolResponse, RuntimeHost,
+    HostDirective, ProcessDisposition, ProtocolRequest, ProtocolResponse, RuntimeHost, emit_script,
 };
 
 pub(crate) struct CefHost;
@@ -282,14 +282,9 @@ cef::wrap_task! {
                 } => {
                     if let Some(b) = browser
                         && let Some(frame) = b.main_frame()
-                        && let Ok(event_js) = serde_json::to_string(event)
+                        && let Some(raw_script) = emit_script(event, payload_json)
                     {
-                        let script = CefString::from(
-                            format!(
-                                "if (window.__forge_dispatch) {{ window.__forge_dispatch({event_js}, {payload_json}); }}"
-                            )
-                            .as_str(),
-                        );
+                        let script = CefString::from(raw_script.as_str());
                         frame.execute_java_script(Some(&script), None, 0);
                     }
                 }

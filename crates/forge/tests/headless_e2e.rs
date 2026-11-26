@@ -3,7 +3,7 @@ use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use forge::http::{Method, Request, StatusCode};
-use forge::{App, AppConfig, Error, ForgeError, Plugin, State, WindowHandle};
+use forge::{App, AppConfig, Error, ErrorKind, ForgeError, Plugin, State, WindowHandle};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -161,12 +161,13 @@ async fn executes_concurrent_commands_enforces_csrf_and_contains_panics() {
     assert_eq!(final_total, 7);
     assert!(app.window_title().starts_with("Tasks ("));
 
-    // 2. Structured domain error preserves code + details
+    // 2. Structured domain/bad_request error preserves code + details + 400 BadRequest kind
     let domain_err = app
         .invoke::<_, AddRes>("counter.add", json!({ "delta": 1, "label": "   " }))
         .await
         .unwrap_err();
     assert_eq!(domain_err.code, "EMPTY_LABEL");
+    assert_eq!(domain_err.kind(), ErrorKind::BadRequest);
     assert_eq!(domain_err.details, Some(json!({ "field": "label" })));
 
     // 3. Unknown command & invalid payload produce distinct built-in error codes

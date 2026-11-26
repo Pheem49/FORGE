@@ -933,8 +933,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aa9a19cbb55df58761df49b23516a86d432839add4af60fc256da840f66ed35b"
 
 [[package]]
-name = "forge"
-version = "0.2.0"
+name = "forge-app"
+version = "0.3.0"
 dependencies = [
  "arboard",
  "cef",
@@ -958,12 +958,13 @@ dependencies = [
 
 [[package]]
 name = "forge-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "clap",
  "dirs",
  "download-cef",
  "flate2",
+ "forge-app",
  "serde",
  "tar",
  "tempfile",
@@ -1354,9 +1355,9 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hello-forge"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
- "forge",
+ "forge-app",
  "serde",
  "serde_json",
  "tempfile",

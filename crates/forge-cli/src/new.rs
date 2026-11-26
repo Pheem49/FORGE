@@ -126,7 +126,9 @@ fn write_react_project(root: &Path, apply: &dyn Fn(&str) -> String) -> Result<()
 fn resolve_forge_dep_spec(explicit_path: Option<&Path>) -> String {
     if let Some(p) = explicit_path {
         let escaped = p.to_string_lossy().replace('\\', "/");
-        return format!(r#"{{ path = "{escaped}", default-features = false }}"#);
+        return format!(
+            r#"{{ package = "forge-app", path = "{escaped}", default-features = false }}"#
+        );
     }
 
     let cli_manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -134,11 +136,13 @@ fn resolve_forge_dep_spec(explicit_path: Option<&Path>) -> String {
         let sibling_forge = crates_dir.join("forge");
         if sibling_forge.join("Cargo.toml").is_file() {
             let escaped = sibling_forge.to_string_lossy().replace('\\', "/");
-            return format!(r#"{{ path = "{escaped}", default-features = false }}"#);
+            return format!(
+                r#"{{ package = "forge-app", path = "{escaped}", default-features = false }}"#
+            );
         }
     }
 
-    r#"{ version = "0.2.0", default-features = false }"#.to_string()
+    r#"{ package = "forge-app", version = "0.3.0", default-features = false }"#.to_string()
 }
 
 fn sanitize_crate_name(raw: &str) -> Result<String> {

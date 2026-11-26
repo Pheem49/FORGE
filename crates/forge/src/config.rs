@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fmt;
 use std::io::Read;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
@@ -10,107 +9,9 @@ use serde::{Deserialize, Serialize};
 use tar::Archive;
 
 use crate::error::{Error, Result};
-
-/// Desktop rendering engine selected for the application.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum RuntimeKind {
-    #[default]
-    #[serde(alias = "wry")]
-    Webview,
-    #[serde(alias = "chromium")]
-    Cef,
-}
-
-impl RuntimeKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Webview => "webview",
-            Self::Cef => "cef",
-        }
-    }
-
-    pub fn parse(raw: &str) -> Option<Self> {
-        match raw.trim().to_ascii_lowercase().as_str() {
-            "webview" | "wry" => Some(Self::Webview),
-            "cef" | "chromium" => Some(Self::Cef),
-            _ => None,
-        }
-    }
-}
-
-impl fmt::Display for RuntimeKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct AppMetaConfig {
-    pub name: String,
-    pub version: String,
-    pub description: Option<String>,
-    pub identifier: String,
-    pub assets: PathBuf,
-    pub icon: Option<PathBuf>,
-}
-
-impl Default for AppMetaConfig {
-    fn default() -> Self {
-        Self {
-            name: "forge-app".to_string(),
-            version: "0.1.0".to_string(),
-            description: None,
-            identifier: "dev.forge.app".to_string(),
-            assets: PathBuf::from("ui"),
-            icon: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct WindowConfig {
-    pub title: String,
-    pub width: u32,
-    pub height: u32,
-    pub min_width: Option<u32>,
-    pub min_height: Option<u32>,
-    pub resizable: bool,
-    pub decorations: bool,
-    pub devtools: bool,
-}
-
-impl Default for WindowConfig {
-    fn default() -> Self {
-        Self {
-            title: "FORGE App".to_string(),
-            width: 1024,
-            height: 768,
-            min_width: None,
-            min_height: None,
-            resizable: true,
-            decorations: true,
-            devtools: true,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct RuntimeConfig {
-    pub default: RuntimeKind,
-}
-
-/// Optional frontend dev-server settings (`[dev]` in `forge.toml`) for Vite / React / Vue HMR.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct DevConfig {
-    pub url: Option<String>,
-    pub before_dev_command: Option<String>,
-    pub before_build_command: Option<String>,
-}
+pub use crate::manifest::{
+    AppMetaConfig, DevConfig, Manifest, RuntimeConfig, RuntimeKind, WindowConfig,
+};
 
 /// Resolved configuration for a FORGE application.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -122,6 +23,18 @@ pub struct Config {
     pub dev: DevConfig,
     #[serde(skip)]
     pub(crate) in_memory_assets: Option<HashMap<String, Vec<u8>>>,
+}
+
+impl From<Manifest> for Config {
+    fn from(m: Manifest) -> Self {
+        Self {
+            app: m.app,
+            window: m.window,
+            runtime: m.runtime,
+            dev: m.dev,
+            in_memory_assets: None,
+        }
+    }
 }
 
 impl Config {
@@ -151,23 +64,17 @@ impl Config {
 
     pub(crate) fn load_from_root(root_dir: &Path) -> Result<Self> {
         let manifest_path = root_dir.join("forge.toml");
-        let mut cfg = if manifest_path.is_file() {
-            let content = std::fs::read_to_string(&manifest_path).map_err(|e| Error::Config {
-                path: Some(manifest_path.clone()),
-                message: format!("failed to read file: {e}"),
-            })?;
-            toml::from_str::<Config>(&content).map_err(|e| Error::Config {
-                path: Some(manifest_path),
-                message: e.to_string(),
-            })?
+        let manifest = if manifest_path.is_file() {
+            Manifest::load(&manifest_path)?
         } else if let Some(embedded_toml) = crate::kernel::EMBEDDED_MANIFEST_TOML {
-            toml::from_str::<Config>(embedded_toml).map_err(|e| Error::Config {
+            Manifest::parse(embedded_toml).map_err(|e| Error::Config {
                 path: None,
                 message: format!("invalid embedded forge.toml: {e}"),
             })?
         } else {
-            Config::default()
+            Manifest::default()
         };
+        let mut cfg = Config::from(manifest);
 
         if let Ok(raw_runtime) = std::env::var("FORGE_RUNTIME")
             && !raw_runtime.trim().is_empty()
@@ -205,13 +112,13 @@ impl Config {
             return kind;
         }
         let manifest_path = root_dir.join("forge.toml");
-        if let Ok(content) = std::fs::read_to_string(manifest_path)
-            && let Ok(parsed) = toml::from_str::<Config>(&content)
+        if manifest_path.is_file()
+            && let Ok(parsed) = Manifest::load(&manifest_path)
         {
             return parsed.runtime.default;
         }
         if let Some(embedded_toml) = crate::kernel::EMBEDDED_MANIFEST_TOML
-            && let Ok(parsed) = toml::from_str::<Config>(embedded_toml)
+            && let Ok(parsed) = Manifest::parse(embedded_toml)
         {
             return parsed.runtime.default;
         }

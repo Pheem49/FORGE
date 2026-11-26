@@ -8,7 +8,7 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 
 use crate::config::Config;
-use crate::error::ForgeError;
+use crate::error::{ErrorKind, ForgeError};
 use crate::kernel::ForgeKernel;
 use crate::runtime::{HostDirective, ProtocolRequest};
 
@@ -113,12 +113,16 @@ impl HeadlessApp {
         if res.status.is_success() {
             Ok(res.body)
         } else {
-            let err = serde_json::from_slice::<ForgeError>(&res.body).unwrap_or_else(|_| {
-                ForgeError::new(
-                    "APP_ERROR",
-                    format!("IPC failed with HTTP status {}", res.status),
-                )
-            });
+            let kind = ErrorKind::from_status(res.status);
+            let err = serde_json::from_slice::<ForgeError>(&res.body)
+                .map(|e| e.set_kind(kind))
+                .unwrap_or_else(|_| {
+                    ForgeError::with_kind(
+                        kind,
+                        "APP_ERROR",
+                        format!("IPC failed with HTTP status {}", res.status),
+                    )
+                });
             Err(err)
         }
     }
