@@ -49,6 +49,14 @@ impl ForgeKernel {
         tokio_handle: tokio::runtime::Handle,
     ) -> Result<Self> {
         let dev_watch_enabled = std::env::var("FORGE_DEV_WATCH").ok().as_deref() == Some("1");
+        let smoke_test_enabled = std::env::var("FORGE_SMOKE_TEST").ok().as_deref() == Some("1");
+        if smoke_test_enabled {
+            tokio_handle.spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                eprintln!("[FORGE_SMOKE_TEST] timed out after 30s waiting for __forge_ready");
+                std::process::exit(124);
+            });
+        }
         let active_dev_url = config
             .dev
             .url
@@ -195,11 +203,17 @@ impl ForgeKernel {
 
         let runtime_name = self.config.runtime.default.as_str();
         let token = &self.launch_token;
+        let smoke_flag = if std::env::var("FORGE_SMOKE_TEST").ok().as_deref() == Some("1") {
+            "true"
+        } else {
+            "false"
+        };
         let script = format!(
             r#"(() => {{
   "use strict";
   const TOKEN = "{token}";
   const RUNTIME = "{runtime_name}";
+  const SMOKE = {smoke_flag};
   const listeners = new Map();
 
   function dispatch(event, payload) {{
@@ -301,7 +315,12 @@ impl ForgeKernel {
           dispatch(ev, payload);
         }}
       }}
-    }}).catch(() => {{}});
+      if (SMOKE) {{
+        return invoke("__forge_ready", {{ ua: navigator.userAgent }});
+      }}
+    }}).catch((err) => {{
+      console.error("[FORGE] bootstrap drain/smoke error:", err);
+    }});
   }}, {{ once: true }});
 }})();
 "#
@@ -372,6 +391,18 @@ impl ForgeKernel {
         if cmd_name == "__forge_drain_events" {
             let events = self.window_handle.mark_js_ready_and_drain_early();
             return json_ok_response(&json!(events), csp);
+        }
+        if cmd_name == "__forge_ready" {
+            let ua = serde_json::from_slice::<Value>(&req.body)
+                .ok()
+                .and_then(|v| v.get("ua").and_then(Value::as_str).map(String::from))
+                .unwrap_or_default();
+            println!(
+                "[FORGE_SMOKE_TEST] ready runtime={} ua={ua}",
+                self.config.runtime.default
+            );
+            self.window_handle.quit_app();
+            return json_ok_response(&json!({ "ok": true }), csp);
         }
 
         let Some(command) = self.commands.get(cmd_name.as_str()) else {

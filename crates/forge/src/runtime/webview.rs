@@ -77,7 +77,7 @@ impl RuntimeHost for WebViewHost {
             builder.with_https_scheme(true)
         };
 
-        let builder = builder.with_url("forge://app/index.html");
+        let builder = builder.with_url("forge://localhost/index.html");
 
         #[cfg(any(
             target_os = "windows",

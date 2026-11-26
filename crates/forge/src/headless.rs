@@ -82,9 +82,12 @@ impl HeadlessApp {
     }
 
     async fn invoke_bytes(&self, cmd: &str, body: Vec<u8>) -> Result<Vec<u8>, ForgeError> {
-        let uri: Uri = format!("forge://app/__forge_ipc/{}", percent_encode_segment(cmd))
-            .parse()
-            .map_err(|e| ForgeError::bad_request("FORGE_INVALID_COMMAND", format!("{e}")))?;
+        let uri: Uri = format!(
+            "forge://localhost/__forge_ipc/{}",
+            percent_encode_segment(cmd)
+        )
+        .parse()
+        .map_err(|e| ForgeError::bad_request("FORGE_INVALID_COMMAND", format!("{e}")))?;
 
         let mut headers = HeaderMap::new();
         headers.insert("content-type", HeaderValue::from_static("application/json"));
@@ -122,13 +125,13 @@ impl HeadlessApp {
 
     pub async fn get_asset(&self, path: &str) -> RawResponse {
         let normalized = if path.starts_with('/') {
-            format!("forge://app{path}")
+            format!("forge://localhost{path}")
         } else {
-            format!("forge://app/{path}")
+            format!("forge://localhost/{path}")
         };
         let uri: Uri = normalized
             .parse()
-            .unwrap_or_else(|_| Uri::from_static("forge://app/"));
+            .unwrap_or_else(|_| Uri::from_static("forge://localhost/"));
         let res = self
             .kernel
             .handle_request(ProtocolRequest {

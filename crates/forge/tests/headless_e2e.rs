@@ -190,7 +190,7 @@ async fn executes_concurrent_commands_enforces_csrf_and_contains_panics() {
     // 5. Forged IPC without X-Forge-Token is rejected with 403 Forbidden
     let forged_req = Request::builder()
         .method(Method::POST)
-        .uri("forge://app/__forge_ipc/counter.get")
+        .uri("forge://localhost/__forge_ipc/counter.get")
         .body(b"null".to_vec())
         .unwrap();
     let forged_res = app.raw_exchange(forged_req).await;

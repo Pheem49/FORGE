@@ -76,13 +76,13 @@ impl RuntimeHost for CefHost {
         let mut scheme_factory = ForgeSchemeFactory::new(Arc::clone(&kernel));
         if cef::register_scheme_handler_factory(
             Some(&CefString::from("forge")),
-            Some(&CefString::from("app")),
+            Some(&CefString::from("localhost")),
             Some(&mut scheme_factory),
         ) == 0
         {
             cef::shutdown();
             return Err(Error::Runtime(
-                "failed to register forge://app custom scheme factory in CEF".into(),
+                "failed to register forge://localhost custom scheme factory in CEF".into(),
             ));
         }
 
@@ -112,7 +112,7 @@ impl RuntimeHost for CefHost {
             ..Default::default()
         };
         let browser_settings = BrowserSettings::default();
-        let entry_url = CefString::from("forge://app/index.html");
+        let entry_url = CefString::from("forge://localhost/index.html");
 
         if cef::browser_host_create_browser(
             Some(&window_info),
@@ -189,7 +189,6 @@ cef::wrap_app! {
         ) {
             #[cfg(target_os = "linux")]
             if let Some(cmd) = command_line {
-                cmd.append_switch(Some(&CefString::from("no-zygote")));
                 cmd.append_switch(Some(&CefString::from("disable-gpu-sandbox")));
             }
             #[cfg(not(target_os = "linux"))]
@@ -199,7 +198,7 @@ cef::wrap_app! {
         fn on_register_custom_schemes(&self, registrar: Option<&mut SchemeRegistrar>) {
             if let Some(reg) = registrar {
                 let opts = (SchemeOptions::STANDARD.get_raw()
-                    | SchemeOptions::LOCAL.get_raw()
+                    | SchemeOptions::DISPLAY_ISOLATED.get_raw()
                     | SchemeOptions::SECURE.get_raw()
                     | SchemeOptions::CORS_ENABLED.get_raw()
                     | SchemeOptions::FETCH_ENABLED.get_raw()) as c_int;
@@ -480,7 +479,7 @@ fn extract_protocol_request(req: &mut Request) -> ProtocolRequest {
     let raw_url = CefString::from(&req.url()).to_string();
     let uri: Uri = raw_url
         .parse()
-        .unwrap_or_else(|_| Uri::from_static("forge://app/"));
+        .unwrap_or_else(|_| Uri::from_static("forge://localhost/"));
 
     let raw_method = CefString::from(&req.method()).to_string();
     let method = Method::from_bytes(raw_method.as_bytes()).unwrap_or(Method::GET);
@@ -503,7 +502,7 @@ fn extract_protocol_request(req: &mut Request) -> ProtocolRequest {
     if let Some(post_data) = req.post_data() {
         let count = post_data.element_count();
         if count > 0 {
-            let mut elements: Vec<Option<PostDataElement>> = Vec::with_capacity(count);
+            let mut elements: Vec<Option<PostDataElement>> = vec![None; count];
             post_data.elements(Some(&mut elements));
             for elem in elements.into_iter().flatten() {
                 let len = elem.bytes_count();
