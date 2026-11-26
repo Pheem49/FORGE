@@ -1,4 +1,5 @@
-pub mod build;
+pub mod bundle;
+pub use bundle as build;
 pub mod cef_provisioner;
 pub mod dev;
 pub mod new;
@@ -74,15 +75,25 @@ pub enum TemplateChoice {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
 pub enum BundleFormat {
-    /// Produce standalone portable bundle, `.tar.gz`, and `.deb` (when `dpkg-deb` is available)
+    /// Produce every bundle format supported on the current host OS whose tools are available
     #[default]
     All,
     /// Produce only the standalone binary / portable directory in `dist/<app-name>/`
     Bin,
-    /// Produce portable `.tar.gz` archive
+    /// Produce portable `.tar.gz` archive (Linux / macOS / Windows)
     Tarball,
-    /// Produce Debian/Ubuntu `.deb` installer package
+    /// Produce Debian/Ubuntu `.deb` installer package (Linux)
     Deb,
+    /// Produce Linux `.AppImage` bundle via `appimagetool` (Linux)
+    Appimage,
+    /// Produce Windows NSIS `.exe` installer via `makensis` (Windows)
+    Nsis,
+    /// Produce portable `.zip` archive (Windows / cross-OS)
+    Zip,
+    /// Produce macOS `<App>.app` bundle (macOS)
+    App,
+    /// Produce macOS `.dmg` disk image via `hdiutil` (macOS)
+    Dmg,
 }
 
 #[derive(Debug, Parser)]
@@ -139,7 +150,7 @@ pub enum Commands {
         #[arg(long, value_enum)]
         runtime: Option<RuntimeChoice>,
 
-        /// Output bundle format (`all`, `bin`, `tarball`, `deb`)
+        /// Output bundle format (`all`, `bin`, `tarball`, `deb`, `appimage`, `nsis`, `zip`, `app`, `dmg`)
         #[arg(long, value_enum, default_value_t = BundleFormat::All)]
         format: BundleFormat,
 

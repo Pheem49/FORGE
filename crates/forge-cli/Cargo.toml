@@ -15,10 +15,13 @@ dirs.workspace = true
 download-cef.workspace = true
 flate2.workspace = true
 forge = { package = "forge-app", path = "../forge", version = "0.3.0", default-features = false }
+image.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 tar.workspace = true
 toml.workspace = true
+zip.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

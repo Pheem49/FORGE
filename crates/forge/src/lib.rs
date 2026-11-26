@@ -14,9 +14,9 @@ pub use http;
 pub use tokio;
 
 pub use config::{
-    AppConfig, AppMetaConfig, Config, DevConfig, ExportedCommand, Manifest, MenuConfig,
-    MenuItemConfig, PermissionMode, PermissionsConfig, RuntimeConfig, RuntimeKind, SubmenuConfig,
-    TrayConfig, WindowConfig, WindowPermissionOverride,
+    AppConfig, AppMetaConfig, BundleConfig, Config, DevConfig, ExportedCommand, Manifest,
+    MenuConfig, MenuItemConfig, PermissionMode, PermissionsConfig, RuntimeConfig, RuntimeKind,
+    SubmenuConfig, TrayConfig, WindowConfig, WindowPermissionOverride,
 };
 pub use error::{Error, ErrorKind, ForgeError, Result, codes};
 pub use handler::{CommandHandler, FromContext, State};

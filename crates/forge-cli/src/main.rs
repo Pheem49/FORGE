@@ -70,11 +70,19 @@ fn main() -> ExitCode {
             .map(|artifacts| {
                 println!("Built standalone bundle: {}", artifacts.app_dir.display());
                 println!("  Executable: {}", artifacts.binary_path.display());
-                if let Some(tar) = artifacts.tarball_path {
-                    println!("  Tarball:    {}", tar.display());
-                }
-                if let Some(deb) = artifacts.deb_path {
-                    println!("  Debian pkg: {}", deb.display());
+                for (label, maybe_path) in [
+                    ("Tarball:   ", &artifacts.tarball_path),
+                    ("Debian pkg:", &artifacts.deb_path),
+                    ("AppImage:  ", &artifacts.appimage_path),
+                    ("NSIS setup:", &artifacts.nsis_path),
+                    ("Zip:       ", &artifacts.zip_path),
+                    ("macOS .app:", &artifacts.macos_app_path),
+                    ("macOS .dmg:", &artifacts.dmg_path),
+                    ("Checksums: ", &artifacts.checksums_path),
+                ] {
+                    if let Some(p) = maybe_path {
+                        println!("  {label} {}", p.display());
+                    }
                 }
             })
         }

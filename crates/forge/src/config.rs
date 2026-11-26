@@ -10,7 +10,7 @@ use tar::Archive;
 
 use crate::error::{Error, Result};
 pub use crate::manifest::{
-    AppMetaConfig, DevConfig, ExportedCommand, Manifest, MenuConfig, MenuItemConfig,
+    AppMetaConfig, BundleConfig, DevConfig, ExportedCommand, Manifest, MenuConfig, MenuItemConfig,
     PermissionMode, PermissionsConfig, RuntimeConfig, RuntimeKind, SubmenuConfig, TrayConfig,
     WindowConfig, WindowPermissionOverride,
 };
@@ -27,6 +27,7 @@ pub struct Config {
     pub permissions: PermissionsConfig,
     pub tray: Option<TrayConfig>,
     pub menu: Option<MenuConfig>,
+    pub bundle: BundleConfig,
     #[serde(skip)]
     pub(crate) in_memory_assets: Option<HashMap<String, Vec<u8>>>,
     #[serde(skip)]
@@ -44,6 +45,7 @@ impl From<Manifest> for Config {
             permissions: m.permissions,
             tray: m.tray,
             menu: m.menu,
+            bundle: m.bundle,
             in_memory_assets: None,
             explicit_state_dir: None,
         }

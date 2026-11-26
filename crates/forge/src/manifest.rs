@@ -261,6 +261,16 @@ pub struct ExportedCommand {
     pub builtin: bool,
 }
 
+/// Optional installer and package metadata (`[bundle]` in `forge.toml`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BundleConfig {
+    pub publisher: Option<String>,
+    pub category: Option<String>,
+    pub copyright: Option<String>,
+    pub homepage: Option<String>,
+}
+
 /// Shared declarative `forge.toml` schema consumed by both the FORGE runtime and `forge-cli`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -273,6 +283,7 @@ pub struct Manifest {
     pub permissions: PermissionsConfig,
     pub tray: Option<TrayConfig>,
     pub menu: Option<MenuConfig>,
+    pub bundle: BundleConfig,
 }
 
 impl Manifest {

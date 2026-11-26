@@ -32,6 +32,11 @@ struct RecordingRunner {
 impl ProcessRunner for RecordingRunner {
     fn run(&self, spec: &CommandSpec) -> Result<i32> {
         self.recorded.borrow_mut().push(spec.clone());
+        // Run real `dpkg-deb` so the produced `.deb` can be inspected (hermetic: only touches temp dirs).
+        if spec.program == "dpkg-deb" {
+            let status = Command::new("dpkg-deb").args(&spec.args).output().unwrap();
+            return Ok(status.status.code().unwrap_or(1));
+        }
         if let Some(export_path) = spec.env.get("FORGE_EXPORT_COMMANDS") {
             let p = PathBuf::from(export_path);
             if let Some(parent) = p.parent() {
@@ -275,4 +280,112 @@ fn permissions_init_exports_commands_and_rewrites_forge_toml_allow_list() {
 
     let updated = forge::manifest::Manifest::load(&app_dir.join("forge.toml")).unwrap();
     assert_eq!(updated.permissions.allow, allowed);
+}
+
+/// Runner that pretends every external packaging tool is installed and records argv.
+#[derive(Default)]
+struct FakeToolsRunner {
+    recorded: RefCell<Vec<CommandSpec>>,
+    target_dir: Option<PathBuf>,
+}
+
+impl ProcessRunner for FakeToolsRunner {
+    fn run(&self, spec: &CommandSpec) -> Result<i32> {
+        self.recorded.borrow_mut().push(spec.clone());
+        if spec.program == "cargo"
+            && let Some(t) = &self.target_dir
+        {
+            let rel = t.join("release");
+            let _ = fs::create_dir_all(&rel);
+            let _ = fs::write(
+                rel.join(format!("fake-app{}", std::env::consts::EXE_SUFFIX)),
+                b"bin",
+            );
+        }
+        // Simulate tool outputs (last arg is the output file for appimagetool / dpkg-deb).
+        if (spec.program == "appimagetool" || spec.program == "dpkg-deb")
+            && let Some(out) = spec.args.last()
+        {
+            let _ = fs::write(out, b"fake-artifact");
+        }
+        Ok(0)
+    }
+
+    fn has_tool(&self, name: &str) -> bool {
+        matches!(name, "dpkg-deb" | "appimagetool" | "makensis" | "hdiutil")
+    }
+}
+
+#[test]
+fn bundler_targets_invoke_exact_tools_and_write_checksums_and_icons() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_dir = temp.path().join("fake-app");
+    create_project(&NewOptions {
+        target_dir: app_dir.clone(),
+        template: TemplateChoice::Vanilla,
+        runtime: RuntimeChoice::Webview,
+        forge_path: None,
+    })
+    .unwrap();
+
+    let provisioner = StubCefProvisioner {
+        cef_dir: temp.path().to_path_buf(),
+        calls: RefCell::new(0),
+    };
+    let runner = FakeToolsRunner {
+        recorded: RefCell::default(),
+        target_dir: Some(app_dir.join("target")),
+    };
+
+    let mk = |format| BuildOptions {
+        manifest_path: Some(app_dir.join("forge.toml")),
+        runtime_override: None,
+        format,
+        out_dir: None,
+    };
+
+    #[cfg(target_os = "linux")]
+    {
+        let art = run_build(&mk(BundleFormat::Appimage), &provisioner, &runner).unwrap();
+        let ai = art.appimage_path.expect("appimage path");
+        assert!(ai.to_string_lossy().ends_with(".AppImage"));
+        let calls = runner.recorded.borrow();
+        let call = calls.iter().find(|c| c.program == "appimagetool").unwrap();
+        assert!(call.args[0].ends_with(".AppDir"));
+        assert!(
+            app_dir
+                .join("target/forge-build/fake-app.AppDir/AppRun")
+                .is_file()
+        );
+        assert!(
+            app_dir
+                .join("target/forge-build/fake-app.AppDir/usr/bin/fake-app")
+                .is_file()
+        );
+    }
+
+    // Icon pipeline: png set, ico, icns
+    let art = run_build(&mk(BundleFormat::Zip), &provisioner, &runner).unwrap();
+    assert!(art.icons.png_512.is_file());
+    assert_eq!(&fs::read(&art.icons.icns_path).unwrap()[..4], b"icns");
+    assert_eq!(&fs::read(&art.icons.ico_path).unwrap()[..4], &[0, 0, 1, 0]);
+
+    // Zip + SHA256SUMS
+    let zip_path = art.zip_path.expect("zip path");
+    assert!(zip_path.is_file());
+    let sums = fs::read_to_string(art.checksums_path.expect("checksums")).unwrap();
+    assert!(sums.contains(zip_path.file_name().unwrap().to_str().unwrap()));
+    assert_eq!(sums.split_whitespace().next().unwrap().len(), 64);
+
+    // Host-incompatible format fails fast naming the host OS.
+    #[cfg(not(target_os = "windows"))]
+    {
+        let err = run_build(&mk(BundleFormat::Nsis), &provisioner, &runner).unwrap_err();
+        assert!(err.to_string().contains(std::env::consts::OS));
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let err = run_build(&mk(BundleFormat::Dmg), &provisioner, &runner).unwrap_err();
+        assert!(err.to_string().contains("not supported on host"));
+    }
 }
