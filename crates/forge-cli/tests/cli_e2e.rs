@@ -3,9 +3,16 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+use forge_cli::bindings::{BindingsOptions, run_bindings};
 use forge_cli::build::{BuildOptions, run_build};
+use forge_cli::bundle::icons::IconSet;
+use forge_cli::bundle::macos::{app::MacAppTarget, dmg::DmgTarget};
+use forge_cli::bundle::staged::StagedApp;
+use forge_cli::bundle::target::BundleTarget;
+use forge_cli::bundle::windows::nsis::NsisTarget;
 use forge_cli::cef_provisioner::CefProvisioner;
 use forge_cli::dev::{CommandSpec, DevOptions, ProcessRunner, run_dev};
+use forge_cli::doctor::{DoctorOptions, run_doctor};
 use forge_cli::new::{NewOptions, create_project};
 use forge_cli::permissions::{PermissionsInitOptions, run_permissions_init};
 use forge_cli::{BundleFormat, Result, RuntimeChoice, TemplateChoice};
@@ -388,4 +395,134 @@ fn bundler_targets_invoke_exact_tools_and_write_checksums_and_icons() {
         let err = run_build(&mk(BundleFormat::Dmg), &provisioner, &runner).unwrap_err();
         assert!(err.to_string().contains("not supported on host"));
     }
+
+    // Directly exercise Windows NSIS and macOS .app / .dmg BundleTargets against FakeToolsRunner
+    let staging = app_dir.join("target/forge-build");
+    let icons = IconSet::generate(&app_dir, None, &staging).unwrap();
+    let manifest = forge::manifest::Manifest::load(&app_dir.join("forge.toml")).unwrap();
+    let staged_app = StagedApp {
+        project_root: app_dir.clone(),
+        staging_dir: staging.clone(),
+        app_dir: app_dir.join("dist/fake-app"),
+        binary_path: app_dir.join("dist/fake-app/fake-app"),
+        bin_name: "fake-app".to_string(),
+        manifest,
+        runtime: RuntimeChoice::Webview,
+        cef_dir: None,
+        icons,
+    };
+    let out_cross = temp.path().join("cross-dist");
+    fs::create_dir_all(&out_cross).unwrap();
+
+    let nsis_out = NsisTarget
+        .package(&staged_app, &runner, &out_cross)
+        .unwrap();
+    assert!(nsis_out.to_string_lossy().ends_with("-setup.exe"));
+    let nsi_script = fs::read_to_string(staging.join("fake-app-installer.nsi")).unwrap();
+    assert!(nsi_script.contains("WebView2"));
+    assert!(nsi_script.contains("CreateShortcut"));
+
+    let mac_app_out = MacAppTarget
+        .package(&staged_app, &runner, &out_cross)
+        .unwrap();
+    let plist = fs::read_to_string(mac_app_out.join("Contents/Info.plist")).unwrap();
+    assert!(plist.contains("CFBundleIdentifier"));
+    assert!(mac_app_out.join("Contents/Resources/icon.icns").is_file());
+
+    let dmg_out = DmgTarget.package(&staged_app, &runner, &out_cross).unwrap();
+    assert!(dmg_out.to_string_lossy().ends_with(".dmg"));
+    assert!(
+        runner
+            .recorded
+            .borrow()
+            .iter()
+            .any(|c| c.program == "hdiutil" && c.args.contains(&"UDZO".to_string()))
+    );
+}
+
+#[test]
+fn scaffolds_vue_and_svelte_templates_and_generates_ts_bindings_and_doctor_reports() {
+    let temp = tempfile::tempdir().unwrap();
+
+    // 1. Vue 3 + Vite + TS template
+    let vue_dir = temp.path().join("vue_notes");
+    create_project(&NewOptions {
+        target_dir: vue_dir.clone(),
+        template: TemplateChoice::Vue,
+        runtime: RuntimeChoice::Webview,
+        forge_path: None,
+    })
+    .expect("vue scaffolding should succeed");
+    assert!(vue_dir.join("src-ui/App.vue").is_file());
+    assert!(vue_dir.join("src-ui/env.d.ts").is_file());
+    let vue_manifest = forge::manifest::Manifest::load(&vue_dir.join("forge.toml")).unwrap();
+    assert!(
+        vue_manifest
+            .permissions
+            .allow
+            .contains(&"greet".to_string())
+    );
+    assert_eq!(vue_manifest.bundle.publisher.as_deref(), Some("Vue Notes"));
+
+    // 2. Svelte 5 + Vite + TS template
+    let svelte_dir = temp.path().join("svelte_desk");
+    create_project(&NewOptions {
+        target_dir: svelte_dir.clone(),
+        template: TemplateChoice::Svelte,
+        runtime: RuntimeChoice::Cef,
+        forge_path: None,
+    })
+    .expect("svelte scaffolding should succeed");
+    assert!(svelte_dir.join("src-ui/App.svelte").is_file());
+    let svelte_manifest = forge::manifest::Manifest::load(&svelte_dir.join("forge.toml")).unwrap();
+    assert_eq!(svelte_manifest.runtime.default.as_str(), "cef");
+
+    // 3. `forge bindings` generates `.d.ts` with union of registered command names
+    let provisioner = StubCefProvisioner {
+        cef_dir: temp.path().to_path_buf(),
+        calls: RefCell::new(0),
+    };
+    let runner = RecordingRunner::default();
+    let dts_path = run_bindings(
+        &BindingsOptions {
+            manifest_path: Some(vue_dir.join("forge.toml")),
+            runtime_override: None,
+            out_path: None,
+        },
+        &provisioner,
+        &runner,
+    )
+    .expect("forge bindings should succeed");
+    assert_eq!(dts_path, vue_dir.join("src-ui/forge-commands.d.ts"));
+    let dts = fs::read_to_string(&dts_path).unwrap();
+    assert!(dts.contains(r#"| "greet""#));
+    assert!(dts.contains(r#"| "fs.read_text""#));
+    assert!(dts.contains(r#"| "window.close""#));
+    assert!(dts.contains("export interface ForgeCommandTypes {}"));
+
+    // 4. `forge doctor` reports exact ✔ / ✖ status with a fake missing-tools runner
+    struct MissingToolsRunner;
+    impl ProcessRunner for MissingToolsRunner {
+        fn run(&self, _spec: &CommandSpec) -> Result<i32> {
+            Ok(0)
+        }
+        fn probe_tool(&self, program: &str, _args: &[&str]) -> bool {
+            program == "rustc" // cargo, cmake, webkit2gtk, node all missing!
+        }
+    }
+
+    let failing_report = run_doctor(
+        &DoctorOptions {
+            manifest_path: Some(vue_dir.join("forge.toml")),
+            runtime_filter: Some(RuntimeChoice::Cef),
+            cef_cache_dir_override: Some(temp.path().join("empty-cef")),
+        },
+        &MissingToolsRunner,
+    );
+    assert!(!failing_report.is_healthy());
+    let rendered = failing_report.render();
+    assert!(rendered.contains("✔ Rust compiler"));
+    assert!(rendered.contains("✖ Cargo package manager"));
+    assert!(rendered.contains("✖ CMake (CEF build)"));
+    assert!(rendered.contains("✖ Node.js runtime"));
 }

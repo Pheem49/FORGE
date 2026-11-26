@@ -32,8 +32,14 @@ pub trait ProcessRunner {
 
     /// Checks whether an auxiliary CLI tool (`strip`, `patchelf`, `dpkg-deb`) is installed.
     fn has_tool(&self, name: &str) -> bool {
-        Command::new(name)
-            .arg("--version")
+        self.probe_tool(name, &["--version"])
+    }
+
+    /// Runs a read-only probe command (`pkg-config --exists ...`, `<tool> --version`) and returns
+    /// `true` when it exits with status `0`.
+    fn probe_tool(&self, program: &str, args: &[&str]) -> bool {
+        Command::new(program)
+            .args(args)
             .output()
             .is_ok_and(|o| o.status.success())
     }

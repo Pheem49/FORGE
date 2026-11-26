@@ -68,7 +68,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        template: [react]
+        template: [react, vue, svelte]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

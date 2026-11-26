@@ -23,6 +23,18 @@ pub struct CachedCefProvisioner {
     pub cache_root_override: Option<PathBuf>,
 }
 
+impl CachedCefProvisioner {
+    pub fn cache_root(&self) -> PathBuf {
+        match &self.cache_root_override {
+            Some(p) => p.clone(),
+            None => dirs::cache_dir()
+                .unwrap_or_else(std::env::temp_dir)
+                .join("forge")
+                .join("cef"),
+        }
+    }
+}
+
 impl CefProvisioner for CachedCefProvisioner {
     fn ensure_cef_ready(&self) -> Result<PathBuf> {
         if let Ok(existing) = std::env::var("CEF_PATH") {

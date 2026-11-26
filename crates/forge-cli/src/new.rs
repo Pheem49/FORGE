@@ -26,6 +26,35 @@ const REACT_MAIN_TSX: &str = include_str!("../../../templates/react/src-ui/main.
 const REACT_APP_TSX: &str = include_str!("../../../templates/react/src-ui/App.tsx");
 const REACT_STYLE_CSS: &str = include_str!("../../../templates/react/src-ui/style.css");
 
+// Vue 3 (Vite + TypeScript) starter template
+const VUE_FORGE_TOML: &str = include_str!("../../../templates/vue/forge.toml.tmpl");
+const VUE_CARGO_TOML: &str = include_str!("../../../templates/vue/Cargo.toml.tmpl");
+const VUE_GITIGNORE: &str = include_str!("../../../templates/vue/gitignore.tmpl");
+const VUE_PACKAGE_JSON: &str = include_str!("../../../templates/vue/package.json.tmpl");
+const VUE_VITE_CONFIG: &str = include_str!("../../../templates/vue/vite.config.ts");
+const VUE_TSCONFIG: &str = include_str!("../../../templates/vue/tsconfig.json");
+const VUE_INDEX_HTML: &str = include_str!("../../../templates/vue/index.html");
+const VUE_MAIN_RS: &str = include_str!("../../../templates/vue/src/main.rs");
+const VUE_FORGE_DTS: &str = include_str!("../../../templates/vue/src-ui/forge.d.ts");
+const VUE_ENV_DTS: &str = include_str!("../../../templates/vue/src-ui/env.d.ts");
+const VUE_MAIN_TS: &str = include_str!("../../../templates/vue/src-ui/main.ts");
+const VUE_APP_VUE: &str = include_str!("../../../templates/vue/src-ui/App.vue");
+const VUE_STYLE_CSS: &str = include_str!("../../../templates/vue/src-ui/style.css");
+
+// Svelte 5 (Vite + TypeScript) starter template
+const SVELTE_FORGE_TOML: &str = include_str!("../../../templates/svelte/forge.toml.tmpl");
+const SVELTE_CARGO_TOML: &str = include_str!("../../../templates/svelte/Cargo.toml.tmpl");
+const SVELTE_GITIGNORE: &str = include_str!("../../../templates/svelte/gitignore.tmpl");
+const SVELTE_PACKAGE_JSON: &str = include_str!("../../../templates/svelte/package.json.tmpl");
+const SVELTE_VITE_CONFIG: &str = include_str!("../../../templates/svelte/vite.config.ts");
+const SVELTE_TSCONFIG: &str = include_str!("../../../templates/svelte/tsconfig.json");
+const SVELTE_INDEX_HTML: &str = include_str!("../../../templates/svelte/index.html");
+const SVELTE_MAIN_RS: &str = include_str!("../../../templates/svelte/src/main.rs");
+const SVELTE_FORGE_DTS: &str = include_str!("../../../templates/svelte/src-ui/forge.d.ts");
+const SVELTE_MAIN_TS: &str = include_str!("../../../templates/svelte/src-ui/main.ts");
+const SVELTE_APP_SVELTE: &str = include_str!("../../../templates/svelte/src-ui/App.svelte");
+const SVELTE_STYLE_CSS: &str = include_str!("../../../templates/svelte/src-ui/style.css");
+
 #[derive(Debug, Clone)]
 pub struct NewOptions {
     pub target_dir: PathBuf,
@@ -79,6 +108,12 @@ pub fn create_project(opts: &NewOptions) -> Result<PathBuf> {
         TemplateChoice::React => {
             write_react_project(&opts.target_dir, &apply)?;
         }
+        TemplateChoice::Vue => {
+            write_vue_project(&opts.target_dir, &apply)?;
+        }
+        TemplateChoice::Svelte => {
+            write_svelte_project(&opts.target_dir, &apply)?;
+        }
     }
 
     Ok(opts.target_dir.clone())
@@ -119,6 +154,51 @@ fn write_react_project(root: &Path, apply: &dyn Fn(&str) -> String) -> Result<()
     write_text(&src_ui_dir.join("main.tsx"), REACT_MAIN_TSX)?;
     write_text(&src_ui_dir.join("App.tsx"), &apply(REACT_APP_TSX))?;
     write_text(&src_ui_dir.join("style.css"), REACT_STYLE_CSS)?;
+
+    Ok(())
+}
+
+fn write_vue_project(root: &Path, apply: &dyn Fn(&str) -> String) -> Result<()> {
+    let src_dir = root.join("src");
+    let src_ui_dir = root.join("src-ui");
+    create_dir(&src_dir)?;
+    create_dir(&src_ui_dir)?;
+
+    write_text(&root.join("forge.toml"), &apply(VUE_FORGE_TOML))?;
+    write_text(&root.join("Cargo.toml"), &apply(VUE_CARGO_TOML))?;
+    write_text(&root.join(".gitignore"), VUE_GITIGNORE)?;
+    write_text(&root.join("package.json"), &apply(VUE_PACKAGE_JSON))?;
+    write_text(&root.join("vite.config.ts"), VUE_VITE_CONFIG)?;
+    write_text(&root.join("tsconfig.json"), VUE_TSCONFIG)?;
+    write_text(&root.join("index.html"), &apply(VUE_INDEX_HTML))?;
+    write_text(&src_dir.join("main.rs"), VUE_MAIN_RS)?;
+    write_text(&src_ui_dir.join("forge.d.ts"), VUE_FORGE_DTS)?;
+    write_text(&src_ui_dir.join("env.d.ts"), VUE_ENV_DTS)?;
+    write_text(&src_ui_dir.join("main.ts"), VUE_MAIN_TS)?;
+    write_text(&src_ui_dir.join("App.vue"), &apply(VUE_APP_VUE))?;
+    write_text(&src_ui_dir.join("style.css"), VUE_STYLE_CSS)?;
+
+    Ok(())
+}
+
+fn write_svelte_project(root: &Path, apply: &dyn Fn(&str) -> String) -> Result<()> {
+    let src_dir = root.join("src");
+    let src_ui_dir = root.join("src-ui");
+    create_dir(&src_dir)?;
+    create_dir(&src_ui_dir)?;
+
+    write_text(&root.join("forge.toml"), &apply(SVELTE_FORGE_TOML))?;
+    write_text(&root.join("Cargo.toml"), &apply(SVELTE_CARGO_TOML))?;
+    write_text(&root.join(".gitignore"), SVELTE_GITIGNORE)?;
+    write_text(&root.join("package.json"), &apply(SVELTE_PACKAGE_JSON))?;
+    write_text(&root.join("vite.config.ts"), SVELTE_VITE_CONFIG)?;
+    write_text(&root.join("tsconfig.json"), SVELTE_TSCONFIG)?;
+    write_text(&root.join("index.html"), &apply(SVELTE_INDEX_HTML))?;
+    write_text(&src_dir.join("main.rs"), SVELTE_MAIN_RS)?;
+    write_text(&src_ui_dir.join("forge.d.ts"), SVELTE_FORGE_DTS)?;
+    write_text(&src_ui_dir.join("main.ts"), SVELTE_MAIN_TS)?;
+    write_text(&src_ui_dir.join("App.svelte"), &apply(SVELTE_APP_SVELTE))?;
+    write_text(&src_ui_dir.join("style.css"), SVELTE_STYLE_CSS)?;
 
     Ok(())
 }

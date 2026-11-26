@@ -1,7 +1,9 @@
+pub mod bindings;
 pub mod bundle;
 pub use bundle as build;
 pub mod cef_provisioner;
 pub mod dev;
+pub mod doctor;
 pub mod new;
 pub mod permissions;
 
@@ -71,6 +73,14 @@ pub enum TemplateChoice {
     #[default]
     Vanilla,
     React,
+    Vue,
+    Svelte,
+}
+
+impl TemplateChoice {
+    pub fn uses_npm(self) -> bool {
+        matches!(self, Self::React | Self::Vue | Self::Svelte)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
@@ -114,7 +124,7 @@ pub enum Commands {
         /// Directory path (or project name) to create
         path: PathBuf,
 
-        /// Starter UI template (`vanilla` or `react`)
+        /// Starter UI template (`vanilla`, `react`, `vue`, or `svelte`)
         #[arg(long, value_enum, default_value_t = TemplateChoice::Vanilla)]
         template: TemplateChoice,
 
@@ -162,6 +172,30 @@ pub enum Commands {
     Permissions {
         #[command(subcommand)]
         action: PermissionsAction,
+    },
+    /// Generate TypeScript `.d.ts` command declarations (`ForgeCommandName` + `ForgeCommandTypes`)
+    Bindings {
+        /// Optional path to `forge.toml` (defaults to `./forge.toml`)
+        #[arg(long)]
+        manifest_path: Option<PathBuf>,
+
+        /// Output `.d.ts` path (defaults to `src-ui/forge-commands.d.ts` or `ui/forge-commands.d.ts`)
+        #[arg(long = "out")]
+        out_path: Option<PathBuf>,
+
+        /// Override the runtime used while inspecting commands
+        #[arg(long, value_enum)]
+        runtime: Option<RuntimeChoice>,
+    },
+    /// Verify Rust, WebView, Chromium CEF, Node.js, and OS packaging toolchains
+    Doctor {
+        /// Optional path to `forge.toml` (defaults to `./forge.toml` if present)
+        #[arg(long)]
+        manifest_path: Option<PathBuf>,
+
+        /// Restrict required checks to a specific runtime (`webview` or `cef`)
+        #[arg(long, value_enum)]
+        runtime: Option<RuntimeChoice>,
     },
 }
 
