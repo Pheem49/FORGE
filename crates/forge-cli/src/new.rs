@@ -3,13 +3,28 @@ use std::path::{Path, PathBuf};
 
 use crate::{CliError, Result, RuntimeChoice, TemplateChoice};
 
-const TMPL_FORGE_TOML: &str = include_str!("../../../templates/vanilla/forge.toml.tmpl");
-const TMPL_CARGO_TOML: &str = include_str!("../../../templates/vanilla/Cargo.toml.tmpl");
-const TMPL_GITIGNORE: &str = include_str!("../../../templates/vanilla/gitignore.tmpl");
-const TMPL_MAIN_RS: &str = include_str!("../../../templates/vanilla/src/main.rs");
-const TMPL_INDEX_HTML: &str = include_str!("../../../templates/vanilla/ui/index.html");
-const TMPL_STYLE_CSS: &str = include_str!("../../../templates/vanilla/ui/style.css");
-const TMPL_MAIN_JS: &str = include_str!("../../../templates/vanilla/ui/main.js");
+// Vanilla starter template
+const VANILLA_FORGE_TOML: &str = include_str!("../../../templates/vanilla/forge.toml.tmpl");
+const VANILLA_CARGO_TOML: &str = include_str!("../../../templates/vanilla/Cargo.toml.tmpl");
+const VANILLA_GITIGNORE: &str = include_str!("../../../templates/vanilla/gitignore.tmpl");
+const VANILLA_MAIN_RS: &str = include_str!("../../../templates/vanilla/src/main.rs");
+const VANILLA_INDEX_HTML: &str = include_str!("../../../templates/vanilla/ui/index.html");
+const VANILLA_STYLE_CSS: &str = include_str!("../../../templates/vanilla/ui/style.css");
+const VANILLA_MAIN_JS: &str = include_str!("../../../templates/vanilla/ui/main.js");
+
+// React (Vite + TypeScript) starter template
+const REACT_FORGE_TOML: &str = include_str!("../../../templates/react/forge.toml.tmpl");
+const REACT_CARGO_TOML: &str = include_str!("../../../templates/react/Cargo.toml.tmpl");
+const REACT_GITIGNORE: &str = include_str!("../../../templates/react/gitignore.tmpl");
+const REACT_PACKAGE_JSON: &str = include_str!("../../../templates/react/package.json.tmpl");
+const REACT_VITE_CONFIG: &str = include_str!("../../../templates/react/vite.config.ts");
+const REACT_TSCONFIG: &str = include_str!("../../../templates/react/tsconfig.json");
+const REACT_INDEX_HTML: &str = include_str!("../../../templates/react/index.html");
+const REACT_MAIN_RS: &str = include_str!("../../../templates/react/src/main.rs");
+const REACT_FORGE_DTS: &str = include_str!("../../../templates/react/src-ui/forge.d.ts");
+const REACT_MAIN_TSX: &str = include_str!("../../../templates/react/src-ui/main.tsx");
+const REACT_APP_TSX: &str = include_str!("../../../templates/react/src-ui/App.tsx");
+const REACT_STYLE_CSS: &str = include_str!("../../../templates/react/src-ui/style.css");
 
 #[derive(Debug, Clone)]
 pub struct NewOptions {
@@ -48,51 +63,62 @@ pub fn create_project(opts: &NewOptions) -> Result<PathBuf> {
     let app_title = humanize_title(&crate_name);
     let forge_dep_spec = resolve_forge_dep_spec(opts.forge_path.as_deref());
 
+    let apply = |tmpl: &str| -> String {
+        tmpl.replace("{{APP_NAME}}", &crate_name)
+            .replace("{{CRATE_NAME}}", &crate_name)
+            .replace("{{APP_SLUG}}", &app_slug)
+            .replace("{{APP_TITLE}}", &app_title)
+            .replace("{{DEFAULT_RUNTIME}}", opts.runtime.as_str())
+            .replace("{{FORGE_DEP_SPEC}}", &forge_dep_spec)
+    };
+
     match opts.template {
         TemplateChoice::Vanilla => {
-            write_vanilla_project(
-                &opts.target_dir,
-                &crate_name,
-                &app_slug,
-                &app_title,
-                opts.runtime,
-                &forge_dep_spec,
-            )?;
+            write_vanilla_project(&opts.target_dir, &apply)?;
+        }
+        TemplateChoice::React => {
+            write_react_project(&opts.target_dir, &apply)?;
         }
     }
 
     Ok(opts.target_dir.clone())
 }
 
-fn write_vanilla_project(
-    root: &Path,
-    crate_name: &str,
-    app_slug: &str,
-    app_title: &str,
-    runtime: RuntimeChoice,
-    forge_dep_spec: &str,
-) -> Result<()> {
+fn write_vanilla_project(root: &Path, apply: &dyn Fn(&str) -> String) -> Result<()> {
     let src_dir = root.join("src");
     let ui_dir = root.join("ui");
     create_dir(&src_dir)?;
     create_dir(&ui_dir)?;
 
-    let apply = |tmpl: &str| -> String {
-        tmpl.replace("{{APP_NAME}}", crate_name)
-            .replace("{{CRATE_NAME}}", crate_name)
-            .replace("{{APP_SLUG}}", app_slug)
-            .replace("{{APP_TITLE}}", app_title)
-            .replace("{{DEFAULT_RUNTIME}}", runtime.as_str())
-            .replace("{{FORGE_DEP_SPEC}}", forge_dep_spec)
-    };
+    write_text(&root.join("forge.toml"), &apply(VANILLA_FORGE_TOML))?;
+    write_text(&root.join("Cargo.toml"), &apply(VANILLA_CARGO_TOML))?;
+    write_text(&root.join(".gitignore"), VANILLA_GITIGNORE)?;
+    write_text(&src_dir.join("main.rs"), VANILLA_MAIN_RS)?;
+    write_text(&ui_dir.join("index.html"), &apply(VANILLA_INDEX_HTML))?;
+    write_text(&ui_dir.join("style.css"), VANILLA_STYLE_CSS)?;
+    write_text(&ui_dir.join("main.js"), VANILLA_MAIN_JS)?;
 
-    write_text(&root.join("forge.toml"), &apply(TMPL_FORGE_TOML))?;
-    write_text(&root.join("Cargo.toml"), &apply(TMPL_CARGO_TOML))?;
-    write_text(&root.join(".gitignore"), TMPL_GITIGNORE)?;
-    write_text(&src_dir.join("main.rs"), TMPL_MAIN_RS)?;
-    write_text(&ui_dir.join("index.html"), &apply(TMPL_INDEX_HTML))?;
-    write_text(&ui_dir.join("style.css"), TMPL_STYLE_CSS)?;
-    write_text(&ui_dir.join("main.js"), TMPL_MAIN_JS)?;
+    Ok(())
+}
+
+fn write_react_project(root: &Path, apply: &dyn Fn(&str) -> String) -> Result<()> {
+    let src_dir = root.join("src");
+    let src_ui_dir = root.join("src-ui");
+    create_dir(&src_dir)?;
+    create_dir(&src_ui_dir)?;
+
+    write_text(&root.join("forge.toml"), &apply(REACT_FORGE_TOML))?;
+    write_text(&root.join("Cargo.toml"), &apply(REACT_CARGO_TOML))?;
+    write_text(&root.join(".gitignore"), REACT_GITIGNORE)?;
+    write_text(&root.join("package.json"), &apply(REACT_PACKAGE_JSON))?;
+    write_text(&root.join("vite.config.ts"), REACT_VITE_CONFIG)?;
+    write_text(&root.join("tsconfig.json"), REACT_TSCONFIG)?;
+    write_text(&root.join("index.html"), &apply(REACT_INDEX_HTML))?;
+    write_text(&src_dir.join("main.rs"), REACT_MAIN_RS)?;
+    write_text(&src_ui_dir.join("forge.d.ts"), REACT_FORGE_DTS)?;
+    write_text(&src_ui_dir.join("main.tsx"), REACT_MAIN_TSX)?;
+    write_text(&src_ui_dir.join("App.tsx"), &apply(REACT_APP_TSX))?;
+    write_text(&src_ui_dir.join("style.css"), REACT_STYLE_CSS)?;
 
     Ok(())
 }
@@ -103,8 +129,6 @@ fn resolve_forge_dep_spec(explicit_path: Option<&Path>) -> String {
         return format!(r#"{{ path = "{escaped}", default-features = false }}"#);
     }
 
-    // Automatically wire to the local workspace `crates/forge` when running from source,
-    // so scaffolded projects compile immediately before `forge` is published to crates.io.
     let cli_manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     if let Some(crates_dir) = cli_manifest_dir.parent() {
         let sibling_forge = crates_dir.join("forge");
@@ -114,7 +138,7 @@ fn resolve_forge_dep_spec(explicit_path: Option<&Path>) -> String {
         }
     }
 
-    r#"{ version = "0.1.0", default-features = false }"#.to_string()
+    r#"{ version = "0.2.0", default-features = false }"#.to_string()
 }
 
 fn sanitize_crate_name(raw: &str) -> Result<String> {

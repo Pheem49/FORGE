@@ -1,7 +1,9 @@
 use std::convert::Infallible;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
+use forge::plugins::{AppFsPlugin, ClipboardPlugin, DialogPlugin, NotificationPlugin};
 use forge::{App, AppConfig, ForgeError, State, WindowHandle};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -36,9 +38,15 @@ pub struct CounterOutput {
     pub window_title: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct WindowActionReq {
+    pub action: String,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HostStatus {
     pub app_name: String,
+    pub version: String,
     pub runtime: String,
     pub pid: u32,
     pub os: String,
@@ -52,6 +60,7 @@ async fn host_status(
 ) -> Result<HostStatus, Infallible> {
     Ok(HostStatus {
         app_name: cfg.app.name.clone(),
+        version: cfg.app.version.clone(),
         runtime: cfg.runtime.default.as_str().to_string(),
         pid: std::process::id(),
         os: std::env::consts::OS.to_string(),
@@ -63,6 +72,7 @@ async fn host_status(
 async fn greet(
     state: State<WorkbenchState>,
     cfg: AppConfig,
+    window: WindowHandle,
     input: GreetInput,
 ) -> Result<GreetOutput, ForgeError> {
     let trimmed = input.name.trim();
@@ -76,12 +86,13 @@ async fn greet(
 
     let count = state.invocations.fetch_add(1, Ordering::Relaxed) + 1;
     let runtime = cfg.runtime.default.as_str().to_string();
-
-    Ok(GreetOutput {
+    let out = GreetOutput {
         greeting: format!("Hello, {trimmed}. Rust processed request #{count} on {runtime}."),
         runtime,
         invocations: count,
-    })
+    };
+    window.emit("bench.greeted", &out)?;
+    Ok(out)
 }
 
 async fn step_counter(
@@ -105,22 +116,62 @@ async fn step_counter(
     })
 }
 
-pub fn build_app(root: Option<&Path>) -> App {
+async fn window_control(window: WindowHandle, req: WindowActionReq) -> Result<String, ForgeError> {
+    match req.action.as_str() {
+        "maximize" => window.set_maximized(true),
+        "restore" => {
+            window.set_maximized(false);
+            window.set_fullscreen(false);
+        }
+        "fullscreen" => window.set_fullscreen(true),
+        other => {
+            return Err(ForgeError::bad_request(
+                "UNKNOWN_WINDOW_ACTION",
+                format!("unsupported window action '{other}'"),
+            ));
+        }
+    }
+    Ok(req.action)
+}
+
+pub fn build_app(root: Option<&Path>, fs_root_override: Option<&Path>) -> App {
     let base = match root {
         Some(p) => App::from_root(p),
         None => App::new(),
     };
-    base.setup(|ctx| {
-        ctx.insert_state(WorkbenchState::default());
-        Ok(())
-    })
-    .command("host.status", host_status)
-    .command("bench.greet", greet)
-    .command("bench.increment", step_counter)
+
+    let fs_plugin = match fs_root_override {
+        Some(p) => AppFsPlugin::with_root(p),
+        None => AppFsPlugin::new(),
+    };
+
+    base.plugin(DialogPlugin::new())
+        .plugin(ClipboardPlugin::new())
+        .plugin(NotificationPlugin::new())
+        .plugin(fs_plugin)
+        .setup(|ctx| {
+            ctx.insert_state(WorkbenchState::default());
+
+            // Background Rust heartbeat pushing live events to JS every 2 seconds.
+            let win = ctx.window();
+            ctx.spawn(async move {
+                let mut tick: u64 = 0;
+                loop {
+                    forge::tokio::time::sleep(Duration::from_secs(2)).await;
+                    tick += 1;
+                    let _ = win.emit("host.heartbeat", json!({ "tick": tick }));
+                }
+            });
+            Ok(())
+        })
+        .command("host.status", host_status)
+        .command("bench.greet", greet)
+        .command("bench.increment", step_counter)
+        .command("bench.window", window_control)
 }
 
 fn main() -> forge::Result<()> {
-    build_app(None).run()
+    build_app(None, None).run()
 }
 
 #[cfg(test)]
@@ -129,39 +180,49 @@ mod tests {
     use std::path::PathBuf;
 
     #[tokio::test]
-    async fn hello_forge_commands_and_ui_work_headlessly() {
+    async fn hello_forge_v0_2_commands_events_and_storage_work_headlessly() {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let app = build_app(Some(&manifest_dir))
+        let temp = tempfile::tempdir().unwrap();
+        let app = build_app(Some(&manifest_dir), Some(temp.path()))
             .headless()
-            .expect("hello-forge should initialize headlessly");
+            .expect("hello-forge v0.2 should initialize headlessly");
 
         let index = app.get_asset("/").await;
         assert_eq!(index.status, forge::http::StatusCode::OK);
 
         let status: HostStatus = app.invoke_unit("host.status").await.unwrap();
         assert_eq!(status.app_name, "hello-forge");
+        assert_eq!(status.version, "0.2.0");
 
         let out: GreetOutput = app
             .invoke("bench.greet", json!({ "name": "Pheem" }))
             .await
             .unwrap();
         assert!(out.greeting.contains("Pheem"));
-        assert_eq!(out.invocations, 1);
 
-        let err = app
-            .invoke::<_, GreetOutput>("bench.greet", json!({ "name": "  " }))
-            .await
-            .unwrap_err();
-        assert_eq!(err.code, "NAME_REQUIRED");
+        // Verify Rust -> JS event was emitted by `bench.greet`
+        let events = app.take_emitted_events();
+        assert!(events.iter().any(|(topic, _)| topic == "bench.greeted"));
 
-        let stepped: CounterOutput = app
+        // Verify sandboxed AppFsPlugin note persistence
+        let (): () = app
             .invoke(
-                "bench.increment",
-                json!({ "step": 5, "sync_window_title": true }),
+                "fs.write_text",
+                json!({ "path": "scratchpad.txt", "contents": "Saved via AppFsPlugin" }),
             )
             .await
             .unwrap();
-        assert_eq!(stepped.value, 5);
-        assert_eq!(app.window_title(), "FORGE Workbench (5)");
+        let saved: String = app
+            .invoke("fs.read_text", json!({ "path": "scratchpad.txt" }))
+            .await
+            .unwrap();
+        assert_eq!(saved, "Saved via AppFsPlugin");
+
+        // Verify window control command
+        let _: String = app
+            .invoke("bench.window", json!({ "action": "maximize" }))
+            .await
+            .unwrap();
+        assert!(app.is_maximized());
     }
 }

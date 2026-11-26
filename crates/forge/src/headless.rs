@@ -4,6 +4,7 @@ use http::header::HeaderValue;
 use http::{HeaderMap, Method, Request, StatusCode, Uri};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde_json::Value;
 use tokio::sync::mpsc;
 
 use crate::config::Config;
@@ -26,12 +27,10 @@ impl RawResponse {
 }
 
 /// Deterministic zero-GUI application harness created via [`crate::App::headless`].
-/// Exercises the exact same configuration, setup hooks, `State<T>` map, static asset security,
-/// bootstrap injection, and async command router as desktop runtimes—without requiring X11,
-/// Wayland, Cocoa, WebView2, or Chromium binaries.
 pub struct HeadlessApp {
     kernel: Arc<ForgeKernel>,
     directives: Mutex<mpsc::UnboundedReceiver<HostDirective>>,
+    emitted_events: Mutex<Vec<(String, Value)>>,
     closed: Mutex<bool>,
     _owned_runtime: Option<tokio::runtime::Runtime>,
 }
@@ -45,18 +44,16 @@ impl HeadlessApp {
         Self {
             kernel,
             directives: Mutex::new(directives),
+            emitted_events: Mutex::new(Vec::new()),
             closed: Mutex::new(false),
             _owned_runtime: owned_runtime,
         }
     }
 
-    /// Returns a reference to the resolved [`Config`].
     pub fn config(&self) -> &Config {
         &self.kernel.config
     }
 
-    /// Invokes a registered async command with automatic launch-token authentication,
-    /// mirroring `await window.forge.invoke(cmd, payload)` in JavaScript.
     pub async fn invoke<P, R>(&self, cmd: &str, payload: P) -> Result<R, ForgeError>
     where
         P: Serialize,
@@ -77,12 +74,11 @@ impl HeadlessApp {
         })
     }
 
-    /// Invokes a zero-argument command (`await window.forge.invoke(cmd)`).
     pub async fn invoke_unit<R>(&self, cmd: &str) -> Result<R, ForgeError>
     where
         R: DeserializeOwned,
     {
-        self.invoke(cmd, serde_json::Value::Null).await
+        self.invoke(cmd, Value::Null).await
     }
 
     async fn invoke_bytes(&self, cmd: &str, body: Vec<u8>) -> Result<Vec<u8>, ForgeError> {
@@ -124,7 +120,6 @@ impl HeadlessApp {
         }
     }
 
-    /// Performs a `GET` request against the static asset / bootstrap exchange (e.g. `"/"` or `"/index.html"`).
     pub async fn get_asset(&self, path: &str) -> RawResponse {
         let normalized = if path.starts_with('/') {
             format!("forge://app{path}")
@@ -151,8 +146,6 @@ impl HeadlessApp {
         }
     }
 
-    /// Sends an arbitrary raw [`http::Request`] into the exchange—useful for security tests
-    /// verifying CSRF rejection when `X-Forge-Token` or `Sec-Fetch-Site` is forged.
     pub async fn raw_exchange(&self, req: Request<Vec<u8>>) -> RawResponse {
         let (parts, body) = req.into_parts();
         let res = self
@@ -172,13 +165,40 @@ impl HeadlessApp {
         }
     }
 
-    /// Returns the most recent window title (reflecting any [`crate::WindowHandle::set_title`] calls).
-    pub fn window_title(&self) -> String {
+    /// Drains and returns all Rust-to-JS push events emitted via [`crate::WindowHandle::emit`].
+    pub fn take_emitted_events(&self) -> Vec<(String, Value)> {
         self.drain_directives();
-        self.kernel.window_handle.current_title()
+        self.emitted_events
+            .lock()
+            .map(|mut g| std::mem::take(&mut *g))
+            .unwrap_or_default()
     }
 
-    /// Returns `true` if a handler called [`crate::WindowHandle::close_window`] or [`crate::WindowHandle::quit_app`].
+    pub fn window_title(&self) -> String {
+        self.drain_directives();
+        self.kernel.window_handle.snapshot_state().title
+    }
+
+    pub fn window_size(&self) -> (u32, u32) {
+        self.drain_directives();
+        self.kernel.window_handle.snapshot_state().size
+    }
+
+    pub fn is_minimized(&self) -> bool {
+        self.drain_directives();
+        self.kernel.window_handle.snapshot_state().minimized
+    }
+
+    pub fn is_maximized(&self) -> bool {
+        self.drain_directives();
+        self.kernel.window_handle.snapshot_state().maximized
+    }
+
+    pub fn is_fullscreen(&self) -> bool {
+        self.drain_directives();
+        self.kernel.window_handle.snapshot_state().fullscreen
+    }
+
     pub fn is_closed(&self) -> bool {
         self.drain_directives();
         self.closed.lock().map(|g| *g).unwrap_or(false)
@@ -188,12 +208,22 @@ impl HeadlessApp {
         if let Ok(mut rx) = self.directives.lock() {
             while let Ok(dir) = rx.try_recv() {
                 match dir {
-                    HostDirective::SetTitle(_) => {}
+                    HostDirective::EmitEvent {
+                        event,
+                        payload_json,
+                    } => {
+                        if let Ok(val) = serde_json::from_str::<Value>(&payload_json)
+                            && let Ok(mut events) = self.emitted_events.lock()
+                        {
+                            events.push((event, val));
+                        }
+                    }
                     HostDirective::CloseWindow | HostDirective::QuitApp => {
                         if let Ok(mut closed) = self.closed.lock() {
                             *closed = true;
                         }
                     }
+                    _ => {}
                 }
             }
         }

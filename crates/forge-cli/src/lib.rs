@@ -1,3 +1,4 @@
+pub mod build;
 pub mod cef_provisioner;
 pub mod dev;
 pub mod new;
@@ -65,6 +66,20 @@ impl RuntimeChoice {
 pub enum TemplateChoice {
     #[default]
     Vanilla,
+    React,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
+pub enum BundleFormat {
+    /// Produce standalone portable bundle, `.tar.gz`, and `.deb` (when `dpkg-deb` is available)
+    #[default]
+    All,
+    /// Produce only the standalone binary / portable directory in `dist/<app-name>/`
+    Bin,
+    /// Produce portable `.tar.gz` archive
+    Tarball,
+    /// Produce Debian/Ubuntu `.deb` installer package
+    Deb,
 }
 
 #[derive(Debug, Parser)]
@@ -85,19 +100,19 @@ pub enum Commands {
         /// Directory path (or project name) to create
         path: PathBuf,
 
-        /// Starter UI template
+        /// Starter UI template (`vanilla` or `react`)
         #[arg(long, value_enum, default_value_t = TemplateChoice::Vanilla)]
         template: TemplateChoice,
 
-        /// Default runtime written into forge.toml
+        /// Default runtime written into `forge.toml`
         #[arg(long, value_enum, default_value_t = RuntimeChoice::Webview)]
         runtime: RuntimeChoice,
 
-        /// Optional local path to the `forge` crate (defaults to workspace `crates/forge` when available)
+        /// Optional local path to the `forge` crate
         #[arg(long)]
         forge_path: Option<PathBuf>,
     },
-    /// Run a FORGE project in development mode with the selected runtime
+    /// Run a FORGE project in live development mode (`Hot Reload` & dev proxy)
     Dev {
         /// Optional path to `forge.toml` (defaults to `./forge.toml`)
         #[arg(long)]
@@ -110,5 +125,23 @@ pub enum Commands {
         /// Build and run in Cargo `--release` mode
         #[arg(long)]
         release: bool,
+    },
+    /// Compile a release binary with embedded UI assets and package distributable bundles
+    Build {
+        /// Optional path to `forge.toml` (defaults to `./forge.toml`)
+        #[arg(long)]
+        manifest_path: Option<PathBuf>,
+
+        /// Override the runtime specified in `forge.toml`
+        #[arg(long, value_enum)]
+        runtime: Option<RuntimeChoice>,
+
+        /// Output bundle format (`all`, `bin`, `tarball`, `deb`)
+        #[arg(long, value_enum, default_value_t = BundleFormat::All)]
+        format: BundleFormat,
+
+        /// Output directory for packaged artifacts (defaults to `<project>/dist`)
+        #[arg(long)]
+        out_dir: Option<PathBuf>,
     },
 }

@@ -263,6 +263,37 @@ cef::wrap_task! {
                         frame.execute_java_script(Some(&script), None, 0);
                     }
                 }
+                HostDirective::SetSize { width, height } => {
+                    if let Some(b) = browser
+                        && let Some(frame) = b.main_frame()
+                    {
+                        let script = CefString::from(
+                            format!("window.resizeTo({width}, {height});").as_str(),
+                        );
+                        frame.execute_java_script(Some(&script), None, 0);
+                    }
+                }
+                HostDirective::SetMinimized(_)
+                | HostDirective::SetMaximized(_)
+                | HostDirective::SetFullscreen(_)
+                | HostDirective::DragWindow => {}
+                HostDirective::EmitEvent {
+                    event,
+                    payload_json,
+                } => {
+                    if let Some(b) = browser
+                        && let Some(frame) = b.main_frame()
+                        && let Ok(event_js) = serde_json::to_string(event)
+                    {
+                        let script = CefString::from(
+                            format!(
+                                "if (window.__forge_dispatch) {{ window.__forge_dispatch({event_js}, {payload_json}); }}"
+                            )
+                            .as_str(),
+                        );
+                        frame.execute_java_script(Some(&script), None, 0);
+                    }
+                }
                 HostDirective::CloseWindow | HostDirective::QuitApp => {
                     if let Some(b) = browser
                         && let Some(host) = b.host()

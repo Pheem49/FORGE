@@ -3,11 +3,15 @@ mod error;
 mod handler;
 mod headless;
 mod kernel;
+pub mod plugins;
 mod runtime;
 
 pub use http;
+pub use tokio;
 
-pub use config::{AppConfig, AppMetaConfig, Config, RuntimeConfig, RuntimeKind, WindowConfig};
+pub use config::{
+    AppConfig, AppMetaConfig, Config, DevConfig, RuntimeConfig, RuntimeKind, WindowConfig,
+};
 pub use error::{Error, ForgeError, Result};
 pub use handler::{CommandHandler, FromContext, State};
 pub use headless::{HeadlessApp, RawResponse};
@@ -25,8 +29,7 @@ use runtime::ProcessDisposition;
 type SetupHook = Box<dyn FnOnce(&mut SetupContext) -> Result<()> + Send + 'static>;
 type ConfigHook = Box<dyn FnOnce(&mut Config) + Send + 'static>;
 
-/// Extension trait for grouping state initialization and commands into reusable modules
-/// (providing a clean growth path toward v0.2 plugins without changing [`App`]).
+/// Extension trait for grouping state initialization and commands into reusable modules.
 pub trait Plugin {
     fn apply(self, app: App) -> App;
 }
@@ -36,6 +39,7 @@ pub trait Plugin {
 pub struct SetupContext<'a> {
     states: &'a mut StateMap,
     config: &'a Config,
+    window: WindowHandle,
     tokio_handle: &'a tokio::runtime::Handle,
 }
 
@@ -50,8 +54,13 @@ impl<'a> SetupContext<'a> {
         self.config
     }
 
-    /// Blocks on an async initialization future (e.g., opening an async database pool)
-    /// using FORGE's internal Tokio runtime.
+    /// Returns a thread-safe [`WindowHandle`] so background tasks spawned during setup
+    /// can emit events (`window.emit(...)`) or update window state.
+    pub fn window(&self) -> WindowHandle {
+        self.window.clone()
+    }
+
+    /// Blocks on an async initialization future using FORGE's internal Tokio runtime.
     pub fn block_on<F: Future>(&self, fut: F) -> F::Output {
         tokio::task::block_in_place(|| self.tokio_handle.block_on(fut))
     }
@@ -81,8 +90,6 @@ impl Default for App {
 }
 
 impl App {
-    /// Creates an application anchored at `FORGE_MANIFEST_DIR` (when invoked via `forge dev`)
-    /// or the current working directory.
     pub fn new() -> Self {
         let root = std::env::var("FORGE_MANIFEST_DIR")
             .ok()
@@ -92,8 +99,6 @@ impl App {
         Self::from_root(root)
     }
 
-    /// Creates an application anchored at an explicit project root directory
-    /// (ideal for isolated parallel integration tests).
     pub fn from_root(root: impl Into<PathBuf>) -> Self {
         Self {
             root_dir: root.into(),
@@ -103,7 +108,6 @@ impl App {
         }
     }
 
-    /// Programmatically overrides values loaded from `forge.toml`.
     pub fn configure<F>(mut self, override_fn: F) -> Self
     where
         F: FnOnce(&mut Config) + Send + 'static,
@@ -112,7 +116,6 @@ impl App {
         self
     }
 
-    /// Registers shared in-memory state `T` accessible to handlers via [`State<T>`].
     pub fn state<T: Send + Sync + 'static>(self, value: T) -> Self {
         self.setup(move |ctx| {
             ctx.insert_state(value);
@@ -120,8 +123,6 @@ impl App {
         })
     }
 
-    /// Registers a lazy initialization hook executed once inside the primary host process
-    /// after Tokio starts and before any window opens or command executes.
     pub fn setup<F>(mut self, hook: F) -> Self
     where
         F: FnOnce(&mut SetupContext) -> Result<()> + Send + 'static,
@@ -130,12 +131,10 @@ impl App {
         self
     }
 
-    /// Applies a composable [`Plugin`] module to this application.
     pub fn plugin(self, plugin: impl Plugin) -> Self {
         plugin.apply(self)
     }
 
-    /// Registers a typed async IPC command reachable from JavaScript via `window.forge.invoke(name, payload)`.
     pub fn command<H, Marker>(mut self, name: &'static str, handler: H) -> Self
     where
         H: CommandHandler<Marker>,
@@ -146,36 +145,32 @@ impl App {
         self
     }
 
-    /// Boots the selected desktop runtime (`webview` or `cef`), opens the application window,
-    /// and blocks the OS main thread until the window closes.
     pub fn run(self) -> Result<()> {
-        // Phase 1: Intercept CEF helper subprocesses BEFORE checking main-thread/Tokio
-        // or running any user setup hooks.
         let early_kind = Config::peek_runtime_kind(&self.root_dir);
         if let ProcessDisposition::SubprocessExited(_code) = runtime::enter_process(early_kind)? {
             return Ok(());
         }
 
-        // Enforce main-thread & non-Tokio entry invariant for native GUI loops.
         if tokio::runtime::Handle::try_current().is_ok() {
             return Err(Error::Config {
                 path: None,
                 message: "do not annotate `fn main()` with `#[tokio::main]`; FORGE manages its own Tokio runtime".into(),
             });
         }
-        if let Some(thread_name) = std::thread::current().name()
-            && thread_name != "main"
-        {
+        if std::thread::current().name() != Some("main") {
             return Err(Error::NotMainThread);
         }
 
         let tokio_rt = build_tokio_runtime()?;
-        let (kernel, directives, _guard) = self.build_kernel(tokio_rt.handle().clone())?;
+        let (kernel, directives) = self.build_kernel(tokio_rt.handle().clone())?;
         let active_kind = kernel.config.runtime.default;
 
-        // Re-verify runtime availability if a `.configure(...)` hook changed `runtime.default`.
-        if active_kind != early_kind {
-            runtime::enter_process(active_kind)?;
+        if active_kind != early_kind
+            && let ProcessDisposition::SubprocessExited(_code) =
+                runtime::enter_process(active_kind)?
+        {
+            drop(tokio_rt);
+            return Ok(());
         }
 
         let res = runtime::run_host(active_kind, kernel, directives);
@@ -183,8 +178,6 @@ impl App {
         res
     }
 
-    /// Initializes configuration, setup hooks, startup `State<T>` validation, and the command
-    /// router in memory without opening an OS window—returning a [`HeadlessApp`] test harness.
     pub fn headless(self) -> Result<HeadlessApp> {
         let (handle, owned_rt) = match tokio::runtime::Handle::try_current() {
             Ok(h) => (h, None),
@@ -193,7 +186,7 @@ impl App {
                 (rt.handle().clone(), Some(rt))
             }
         };
-        let (kernel, directives, ()) = self.build_kernel(handle)?;
+        let (kernel, directives) = self.build_kernel(handle)?;
         Ok(HeadlessApp::new(kernel, directives, owned_rt))
     }
 
@@ -203,7 +196,6 @@ impl App {
     ) -> Result<(
         Arc<ForgeKernel>,
         tokio::sync::mpsc::UnboundedReceiver<runtime::HostDirective>,
-        (),
     )> {
         let mut config = Config::load_from_root(&self.root_dir)?;
         for hook in self.config_hooks {
@@ -225,12 +217,18 @@ impl App {
             }
         }
 
+        let (window_handle, directives) = WindowHandle::new(
+            config.window.title.clone(),
+            (config.window.width, config.window.height),
+        );
+
         let mut states = StateMap::default();
         {
             let _enter = tokio_handle.enter();
             let mut setup_ctx = SetupContext {
                 states: &mut states,
                 config: &config,
+                window: window_handle.clone(),
                 tokio_handle: &tokio_handle,
             };
             for hook in self.setup_hooks {
@@ -238,8 +236,6 @@ impl App {
             }
         }
 
-        // Startup TypeId verification: fail fast before opening any window if a command
-        // requests State<T> that was never registered.
         for (&cmd_name, cmd) in &command_map {
             for (type_id, type_name) in cmd.required_states() {
                 if !states.contains_type_id(&type_id) {
@@ -251,7 +247,6 @@ impl App {
             }
         }
 
-        let (window_handle, directives) = WindowHandle::new(config.window.title.clone());
         let kernel = ForgeKernel::new(
             &self.root_dir,
             config,
@@ -261,7 +256,7 @@ impl App {
             tokio_handle,
         )?;
 
-        Ok((Arc::new(kernel), directives, ()))
+        Ok((Arc::new(kernel), directives))
     }
 }
 

@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::io::Read;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
+use tar::Archive;
 
 use crate::error::{Error, Result};
 
@@ -46,16 +49,22 @@ impl fmt::Display for RuntimeKind {
 #[serde(default)]
 pub struct AppMetaConfig {
     pub name: String,
+    pub version: String,
+    pub description: Option<String>,
     pub identifier: String,
     pub assets: PathBuf,
+    pub icon: Option<PathBuf>,
 }
 
 impl Default for AppMetaConfig {
     fn default() -> Self {
         Self {
             name: "forge-app".to_string(),
+            version: "0.1.0".to_string(),
+            description: None,
             identifier: "dev.forge.app".to_string(),
             assets: PathBuf::from("ui"),
+            icon: None,
         }
     }
 }
@@ -69,6 +78,7 @@ pub struct WindowConfig {
     pub min_width: Option<u32>,
     pub min_height: Option<u32>,
     pub resizable: bool,
+    pub decorations: bool,
     pub devtools: bool,
 }
 
@@ -81,6 +91,7 @@ impl Default for WindowConfig {
             min_width: None,
             min_height: None,
             resizable: true,
+            decorations: true,
             devtools: true,
         }
     }
@@ -92,21 +103,29 @@ pub struct RuntimeConfig {
     pub default: RuntimeKind,
 }
 
+/// Optional frontend dev-server settings (`[dev]` in `forge.toml`) for Vite / React / Vue HMR.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DevConfig {
+    pub url: Option<String>,
+    pub before_dev_command: Option<String>,
+    pub before_build_command: Option<String>,
+}
+
 /// Resolved configuration for a FORGE application.
-/// Loaded from `forge.toml` (single source of truth), layered with `FORGE_*` environment
-/// overrides and optional programmatic [`crate::App::configure`] hooks.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub app: AppMetaConfig,
     pub window: WindowConfig,
     pub runtime: RuntimeConfig,
+    pub dev: DevConfig,
     #[serde(skip)]
     pub(crate) in_memory_assets: Option<HashMap<String, Vec<u8>>>,
 }
 
 impl Config {
-    /// Registers in-memory static assets (primarily useful for single-file demos or headless tests).
+    /// Registers an in-memory static asset (useful for single-file demos or headless tests).
     pub fn with_memory_asset(
         &mut self,
         path: impl Into<String>,
@@ -122,6 +141,14 @@ impl Config {
         self
     }
 
+    /// Unpacks a `.tar.gz` archive of static UI assets into the in-memory asset map.
+    pub fn load_embedded_tar_gz(&mut self, archive_bytes: &[u8]) -> Result<&mut Self> {
+        let map = unpack_tar_gz_assets(archive_bytes)?;
+        let target = self.in_memory_assets.get_or_insert_with(HashMap::new);
+        target.extend(map);
+        Ok(self)
+    }
+
     pub(crate) fn load_from_root(root_dir: &Path) -> Result<Self> {
         let manifest_path = root_dir.join("forge.toml");
         let mut cfg = if manifest_path.is_file() {
@@ -132,6 +159,11 @@ impl Config {
             toml::from_str::<Config>(&content).map_err(|e| Error::Config {
                 path: Some(manifest_path),
                 message: e.to_string(),
+            })?
+        } else if let Some(embedded_toml) = crate::kernel::EMBEDDED_MANIFEST_TOML {
+            toml::from_str::<Config>(embedded_toml).map_err(|e| Error::Config {
+                path: None,
+                message: format!("invalid embedded forge.toml: {e}"),
             })?
         } else {
             Config::default()
@@ -155,6 +187,12 @@ impl Config {
             cfg.app.assets = PathBuf::from(assets_override);
         }
 
+        if let Ok(dev_url) = std::env::var("FORGE_DEV_URL")
+            && !dev_url.trim().is_empty()
+        {
+            cfg.dev.url = Some(dev_url.trim().to_string());
+        }
+
         Ok(cfg)
     }
 
@@ -172,8 +210,54 @@ impl Config {
         {
             return parsed.runtime.default;
         }
+        if let Some(embedded_toml) = crate::kernel::EMBEDDED_MANIFEST_TOML
+            && let Ok(parsed) = toml::from_str::<Config>(embedded_toml)
+        {
+            return parsed.runtime.default;
+        }
         RuntimeKind::Webview
     }
+}
+
+pub(crate) fn unpack_tar_gz_assets(archive_bytes: &[u8]) -> Result<HashMap<String, Vec<u8>>> {
+    let gz = GzDecoder::new(archive_bytes);
+    let mut archive = Archive::new(gz);
+    let mut assets = HashMap::new();
+
+    let entries = archive.entries().map_err(|e| Error::Config {
+        path: None,
+        message: format!("invalid embedded UI archive: {e}"),
+    })?;
+
+    for entry_res in entries {
+        let mut entry = entry_res.map_err(|e| Error::Config {
+            path: None,
+            message: format!("corrupt embedded UI archive entry: {e}"),
+        })?;
+        if !entry.header().entry_type().is_file() {
+            continue;
+        }
+        let rel_path = entry
+            .path()
+            .map_err(|e| Error::Config {
+                path: None,
+                message: format!("invalid embedded asset path: {e}"),
+            })?
+            .to_string_lossy()
+            .replace('\\', "/");
+        let clean = rel_path.trim_start_matches("./").trim_start_matches('/');
+        if clean.is_empty() {
+            continue;
+        }
+        let mut buf = Vec::with_capacity(entry.size() as usize);
+        entry.read_to_end(&mut buf).map_err(|e| Error::Config {
+            path: None,
+            message: format!("failed to decompress embedded asset '{clean}': {e}"),
+        })?;
+        assets.insert(format!("/{clean}"), buf);
+    }
+
+    Ok(assets)
 }
 
 /// Read-only extractor providing access to the resolved [`Config`] inside command handlers.

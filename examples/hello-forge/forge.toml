@@ -1,15 +1,18 @@
 [app]
 name = "hello-forge"
+version = "0.2.0"
+description = "FORGE v0.2 Runtime, Live Event & Plugin Workbench"
 identifier = "dev.forge.hello"
 assets = "ui"
 
 [window]
 title = "FORGE Workbench"
-width = 980
-height = 660
-min_width = 680
-min_height = 480
+width = 1000
+height = 700
+min_width = 700
+min_height = 500
 resizable = true
+decorations = true
 devtools = true
 
 [runtime]

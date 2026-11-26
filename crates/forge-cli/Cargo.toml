@@ -1,6 +1,6 @@
 [package]
 name = "forge-cli"
-description = "Project generator and runtime runner CLI for the FORGE desktop platform."
+description = "Project generator, live dev runner, and desktop bundler CLI for the FORGE platform."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,7 +13,9 @@ path = "src/main.rs"
 clap.workspace = true
 dirs.workspace = true
 download-cef.workspace = true
+flate2.workspace = true
 serde.workspace = true
+tar.workspace = true
 toml.workspace = true
 
 [dev-dependencies]

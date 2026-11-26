@@ -1,0 +1,21 @@
+[app]
+name = "{{APP_NAME}}"
+version = "0.1.0"
+description = "{{APP_TITLE}} desktop application built with FORGE and React"
+identifier = "dev.forge.{{APP_SLUG}}"
+assets = "dist-ui"
+
+[window]
+title = "{{APP_TITLE}}"
+width = 1024
+height = 680
+resizable = true
+devtools = true
+
+[runtime]
+default = "{{DEFAULT_RUNTIME}}"
+
+[dev]
+url = "http://127.0.0.1:5173"
+before_dev_command = "npm run dev"
+before_build_command = "npm run build"

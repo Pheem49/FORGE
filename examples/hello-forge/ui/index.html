@@ -10,20 +10,25 @@
     <main class="workbench">
       <header class="masthead">
         <div class="masthead-title">
-          <h1>FORGE Workbench</h1>
+          <h1>FORGE Workbench <span class="ver">v0.2</span></h1>
           <p class="subtitle">
-            One Rust codebase and HTML interface running across System WebView and Chromium.
+            One Rust codebase running across System WebView and Chromium with live push events and native plugins.
           </p>
         </div>
-        <div class="runtime-badge" id="runtime-badge" aria-live="polite">
-          <span class="status-dot"></span>
-          <span id="runtime-label">Connecting to Rust host...</span>
+        <div class="badges">
+          <div class="runtime-badge" aria-live="polite">
+            <span class="status-dot"></span>
+            <span id="runtime-label">Connecting...</span>
+          </div>
+          <div class="runtime-badge" title="Live Rust -> JS background push stream">
+            <span id="heartbeat-label">Heartbeat: waiting</span>
+          </div>
         </div>
       </header>
 
       <div class="columns">
         <section class="panel" aria-labelledby="ipc-heading">
-          <h2 id="ipc-heading">Rust command invocations</h2>
+          <h2 id="ipc-heading">Commands, state &amp; storage</h2>
 
           <form id="greet-form" class="control-group" novalidate>
             <label for="name-input">Developer name</label>
@@ -45,15 +50,34 @@
           <div class="control-group">
             <div class="counter-header">
               <div>
-                <h3>Shared state counter</h3>
-                <p class="hint">Stored in Rust <code>State&lt;WorkbenchState&gt;</code> and synced to the OS window title.</p>
+                <h3>Shared state &amp; window controls</h3>
+                <p class="hint">Mutates <code>State&lt;WorkbenchState&gt;</code> and native window state.</p>
               </div>
               <output id="counter-value" class="counter-readout">0</output>
             </div>
             <div class="button-row">
               <button type="button" id="inc-one-btn" class="btn-secondary">Add 1</button>
               <button type="button" id="inc-five-btn" class="btn-secondary">Add 5</button>
+              <button type="button" id="max-btn" class="btn-secondary">Maximize</button>
+              <button type="button" id="restore-btn" class="btn-secondary">Restore</button>
             </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="control-group">
+            <label for="note-input">Sandboxed app note (<code>AppFsPlugin</code>)</label>
+            <div class="input-row">
+              <input
+                id="note-input"
+                type="text"
+                placeholder="Write a persistent note..."
+                autocomplete="off"
+              />
+              <button type="button" id="save-note-btn" class="btn-secondary">Save note</button>
+              <button type="button" id="copy-note-btn" class="btn-secondary">Copy</button>
+            </div>
+            <p id="note-feedback" class="feedback" role="status" aria-live="polite"></p>
           </div>
         </section>
 
@@ -76,11 +100,11 @@
           </dl>
 
           <div class="log-header">
-            <h3>Recent IPC calls</h3>
+            <h3>Recent IPC &amp; push events</h3>
             <button type="button" id="clear-log-btn" class="btn-ghost">Clear log</button>
           </div>
           <ol id="ipc-log" class="ipc-log" aria-live="polite">
-            <li class="log-empty">Invoke a command to inspect round-trip timing.</li>
+            <li class="log-empty">Invoke a command or wait for a Rust push event.</li>
           </ol>
         </section>
       </div>

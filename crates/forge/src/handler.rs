@@ -62,7 +62,7 @@ pub trait FromContext: sealed::Sealed + Sized {
 }
 
 /// Shared application state extractor (`Clone` + `Deref<Target = T>`).
-pub struct State<T: ?Sized>(pub(crate) Arc<T>);
+pub struct State<T: ?Sized>(Arc<T>);
 
 impl<T: ?Sized> Clone for State<T> {
     fn clone(&self) -> Self {

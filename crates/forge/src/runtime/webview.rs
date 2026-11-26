@@ -4,7 +4,7 @@ use tao::dpi::LogicalSize;
 use tao::event::{Event, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tao::platform::run_return::EventLoopExtRunReturn;
-use tao::window::WindowBuilder;
+use tao::window::{Fullscreen, WindowBuilder};
 use tokio::sync::mpsc;
 use wry::WebViewBuilder;
 
@@ -22,7 +22,6 @@ impl RuntimeHost for WebViewHost {
         let mut event_loop = EventLoopBuilder::<HostDirective>::with_user_event().build();
         let proxy = event_loop.create_proxy();
 
-        // Forward async HostDirectives from Tokio handlers onto the native GUI event loop.
         let forwarder = kernel.tokio_handle.spawn(async move {
             while let Some(directive) = directives.recv().await {
                 if proxy.send_event(directive).is_err() {
@@ -35,7 +34,8 @@ impl RuntimeHost for WebViewHost {
         let mut window_builder = WindowBuilder::new()
             .with_title(&win_cfg.title)
             .with_inner_size(LogicalSize::new(win_cfg.width, win_cfg.height))
-            .with_resizable(win_cfg.resizable);
+            .with_resizable(win_cfg.resizable)
+            .with_decorations(win_cfg.decorations);
 
         if let (Some(min_w), Some(min_h)) = (win_cfg.min_width, win_cfg.min_height) {
             window_builder = window_builder.with_min_inner_size(LogicalSize::new(min_w, min_h));
@@ -85,7 +85,7 @@ impl RuntimeHost for WebViewHost {
             target_os = "ios",
             target_os = "android"
         ))]
-        let _webview = builder
+        let webview = builder
             .build(&window)
             .map_err(|e| Error::Runtime(format!("failed to initialize system WebView: {e}")))?;
 
@@ -95,7 +95,7 @@ impl RuntimeHost for WebViewHost {
             target_os = "ios",
             target_os = "android"
         )))]
-        let _webview = {
+        let webview = {
             use tao::platform::unix::WindowExtUnix;
             use wry::WebViewBuilderExtUnix;
             let vbox = window.default_vbox().ok_or_else(|| {
@@ -119,6 +119,37 @@ impl RuntimeHost for WebViewHost {
                 Event::UserEvent(directive) => match directive {
                     HostDirective::SetTitle(new_title) => {
                         window.set_title(&new_title);
+                    }
+                    HostDirective::SetSize { width, height } => {
+                        window.set_inner_size(LogicalSize::new(width, height));
+                    }
+                    HostDirective::SetMinimized(minimized) => {
+                        window.set_minimized(minimized);
+                    }
+                    HostDirective::SetMaximized(maximized) => {
+                        window.set_maximized(maximized);
+                    }
+                    HostDirective::SetFullscreen(fullscreen) => {
+                        let mode = if fullscreen {
+                            Some(Fullscreen::Borderless(None))
+                        } else {
+                            None
+                        };
+                        window.set_fullscreen(mode);
+                    }
+                    HostDirective::DragWindow => {
+                        let _ = window.drag_window();
+                    }
+                    HostDirective::EmitEvent {
+                        event,
+                        payload_json,
+                    } => {
+                        if let Ok(event_js) = serde_json::to_string(&event) {
+                            let script = format!(
+                                "if (window.__forge_dispatch) {{ window.__forge_dispatch({event_js}, {payload_json}); }}"
+                            );
+                            let _ = webview.evaluate_script(&script);
+                        }
                     }
                     HostDirective::CloseWindow | HostDirective::QuitApp => {
                         *control_flow = ControlFlow::Exit;

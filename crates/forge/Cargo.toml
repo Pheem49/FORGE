@@ -6,20 +6,38 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-default = ["webview"]
+default = ["webview", "dev-tools"]
 webview = ["dep:tao", "dep:wry"]
 cef = ["dep:cef", "dep:dirs"]
+dev-tools = ["dep:notify", "dep:ureq"]
+plugin-dialog = ["dep:rfd"]
+plugin-clipboard = ["dep:arboard"]
+plugin-notification = ["dep:notify-rust"]
+plugin-fs = ["dep:dirs"]
+plugins = [
+    "plugin-dialog",
+    "plugin-clipboard",
+    "plugin-notification",
+    "plugin-fs",
+]
 
 [dependencies]
+arboard = { workspace = true, optional = true }
 cef = { workspace = true, optional = true }
 dirs = { workspace = true, optional = true }
+flate2.workspace = true
 getrandom.workspace = true
 http.workspace = true
+notify = { workspace = true, optional = true }
+notify-rust = { workspace = true, optional = true }
+rfd = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 tao = { workspace = true, optional = true }
+tar.workspace = true
 tokio.workspace = true
 toml.workspace = true
+ureq = { workspace = true, optional = true }
 wry = { workspace = true, optional = true }
 
 [dev-dependencies]

@@ -5,8 +5,8 @@ edition = "2024"
 
 [features]
 default = ["webview"]
-webview = ["forge/webview"]
-cef = ["forge/cef"]
+webview = ["forge/webview", "forge/dev-tools", "forge/plugins"]
+cef = ["forge/cef", "forge/dev-tools", "forge/plugins"]
 
 [dependencies]
 forge = {{FORGE_DEP_SPEC}}

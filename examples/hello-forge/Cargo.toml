@@ -6,13 +6,14 @@ publish = false
 
 [features]
 default = ["webview"]
-webview = ["forge/webview"]
-cef = ["forge/cef"]
+webview = ["forge/webview", "forge/dev-tools", "forge/plugins"]
+cef = ["forge/cef", "forge/dev-tools", "forge/plugins"]
 
 [dependencies]
-forge = { path = "../../crates/forge", default-features = false }
+forge = { path = "../../crates/forge", default-features = false, features = ["plugins"] }
 serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+tempfile.workspace = true
 tokio.workspace = true

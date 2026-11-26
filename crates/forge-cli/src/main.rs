@@ -1,10 +1,11 @@
 use std::process::ExitCode;
 
 use clap::Parser;
+use forge_cli::build::{BuildOptions, run_build};
 use forge_cli::cef_provisioner::CachedCefProvisioner;
 use forge_cli::dev::{DevOptions, OsProcessRunner, run_dev};
 use forge_cli::new::{NewOptions, create_project};
-use forge_cli::{Cli, Commands};
+use forge_cli::{Cli, Commands, TemplateChoice};
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -25,6 +26,9 @@ fn main() -> ExitCode {
             println!("Created FORGE project at {}", created.display());
             println!("Next steps:");
             println!("  cd {}", created.display());
+            if template == TemplateChoice::React {
+                println!("  npm install");
+            }
             println!("  forge dev");
         }),
         Commands::Dev {
@@ -43,6 +47,35 @@ fn main() -> ExitCode {
                 &provisioner,
                 &runner,
             )
+        }
+        Commands::Build {
+            manifest_path,
+            runtime,
+            format,
+            out_dir,
+        } => {
+            let provisioner = CachedCefProvisioner::default();
+            let runner = OsProcessRunner;
+            run_build(
+                &BuildOptions {
+                    manifest_path,
+                    runtime_override: runtime,
+                    format,
+                    out_dir,
+                },
+                &provisioner,
+                &runner,
+            )
+            .map(|artifacts| {
+                println!("Built standalone bundle: {}", artifacts.app_dir.display());
+                println!("  Executable: {}", artifacts.binary_path.display());
+                if let Some(tar) = artifacts.tarball_path {
+                    println!("  Tarball:    {}", tar.display());
+                }
+                if let Some(deb) = artifacts.deb_path {
+                    println!("  Debian pkg: {}", deb.display());
+                }
+            })
         }
     };
 

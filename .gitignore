@@ -1,6 +1,8 @@
-# Rust build artifacts
+# Rust & bundle build artifacts
 /target
 **/target/
+/dist
+**/dist/
 **/*.rs.bk
 
 # Local environment & editor files

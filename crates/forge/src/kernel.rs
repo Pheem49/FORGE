@@ -11,20 +11,20 @@ use http::header::{
     X_CONTENT_TYPE_OPTIONS,
 };
 use http::{HeaderMap, Method, StatusCode};
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokio::task::AbortHandle;
 
-use crate::config::Config;
+use crate::config::{Config, unpack_tar_gz_assets};
 use crate::error::{Error, ForgeError, Result};
 use crate::handler::{ErasedCommand, InvokeContext, StateMap};
 use crate::runtime::{ProtocolRequest, ProtocolResponse, WindowHandle};
 
-const DEFAULT_CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'";
+include!(concat!(env!("OUT_DIR"), "/embedded_assets.rs"));
+
+const STRICT_CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'";
+const DEV_PROXY_CSP: &str = "default-src 'self' http://localhost:* http://127.0.0.1:*; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* http://127.0.0.1:*; style-src 'self' 'unsafe-inline' http://localhost:* http://127.0.0.1:*; img-src 'self' data: blob: http://localhost:* http://127.0.0.1:*; font-src 'self' data: http://localhost:* http://127.0.0.1:*; connect-src 'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*";
 const BOOTSTRAP_TAG: &str = r#"<script src="/__forge/bootstrap.js"></script>"#;
 
-/// Deep in-process application engine shared identically across `WebViewHost`, `CefHost`,
-/// and `HeadlessApp`. Owns configuration, frozen state, static asset resolution, capability
-/// token verification, and async command routing.
 pub(crate) struct ForgeKernel {
     pub(crate) config: Arc<Config>,
     pub(crate) canonical_assets_root: Option<PathBuf>,
@@ -33,18 +33,39 @@ pub(crate) struct ForgeKernel {
     pub(crate) launch_token: String,
     pub(crate) window_handle: WindowHandle,
     pub(crate) tokio_handle: tokio::runtime::Handle,
+    #[cfg(feature = "dev-tools")]
+    pub(crate) dev_proxy: Option<(String, ureq::Agent)>,
+    #[cfg(feature = "dev-tools")]
+    _watcher_guard: Option<Box<dyn Send + Sync>>,
 }
 
 impl ForgeKernel {
     pub(crate) fn new(
         root_dir: &Path,
-        config: Config,
+        mut config: Config,
         states: StateMap,
         commands: HashMap<&'static str, Arc<dyn ErasedCommand>>,
         window_handle: WindowHandle,
         tokio_handle: tokio::runtime::Handle,
     ) -> Result<Self> {
-        let canonical_assets_root = if config.in_memory_assets.is_some() {
+        let dev_watch_enabled = std::env::var("FORGE_DEV_WATCH").ok().as_deref() == Some("1");
+        let active_dev_url = config
+            .dev
+            .url
+            .clone()
+            .filter(|_| dev_watch_enabled || std::env::var("FORGE_DEV_URL").is_ok());
+
+        // Hydrate single-binary embedded UI archive when running standalone release builds.
+        if config.in_memory_assets.is_none()
+            && !dev_watch_enabled
+            && active_dev_url.is_none()
+            && let Some(archive_bytes) = EMBEDDED_UI_ARCHIVE
+        {
+            config.in_memory_assets = Some(unpack_tar_gz_assets(archive_bytes)?);
+        }
+
+        let canonical_assets_root = if config.in_memory_assets.is_some() || active_dev_url.is_some()
+        {
             None
         } else {
             let candidate = if config.app.assets.is_absolute() {
@@ -61,6 +82,26 @@ impl ForgeKernel {
             })?)
         };
 
+        #[cfg(feature = "dev-tools")]
+        let dev_proxy = active_dev_url.as_ref().map(|url| {
+            let agent_cfg = ureq::Agent::config_builder()
+                .http_status_as_error(false)
+                .timeout_global(Some(std::time::Duration::from_secs(10)))
+                .build();
+            let agent: ureq::Agent = agent_cfg.into();
+            (url.trim_end_matches('/').to_string(), agent)
+        });
+
+        #[cfg(feature = "dev-tools")]
+        let watcher_guard = if dev_watch_enabled
+            && active_dev_url.is_none()
+            && let Some(watch_root) = canonical_assets_root.as_ref()
+        {
+            start_live_reload_watcher(watch_root, window_handle.clone(), &tokio_handle).ok()
+        } else {
+            None
+        };
+
         let launch_token = generate_launch_token()?;
 
         Ok(Self {
@@ -71,11 +112,14 @@ impl ForgeKernel {
             launch_token,
             window_handle,
             tokio_handle,
+            #[cfg(feature = "dev-tools")]
+            dev_proxy,
+            #[cfg(feature = "dev-tools")]
+            _watcher_guard: watcher_guard,
         })
     }
 
     /// Non-blocking entry point invoked by GUI / IO threads (`WebViewHost` and `CefHost`).
-    /// Spawns request execution onto the Tokio worker pool and invokes `respond` once complete.
     #[allow(dead_code)]
     pub(crate) fn dispatch_async<F>(
         self: &Arc<Self>,
@@ -93,7 +137,6 @@ impl ForgeKernel {
         join.abort_handle()
     }
 
-    /// Core unified exchange handling static assets, bootstrap SDK injection, and `/__forge_ipc/*`.
     pub(crate) async fn handle_request(&self, req: ProtocolRequest) -> ProtocolResponse {
         let raw_path = req.uri.path();
 
@@ -106,7 +149,39 @@ impl ForgeKernel {
             return self.handle_ipc(&encoded_cmd, req).await;
         }
 
+        #[cfg(feature = "dev-tools")]
+        if let Some((base_url, agent)) = &self.dev_proxy {
+            let path_and_query = req
+                .uri
+                .path_and_query()
+                .map(|pq| pq.as_str().to_string())
+                .unwrap_or_else(|| "/".to_string());
+            let base = base_url.clone();
+            let agent = agent.clone();
+            let method = req.method.clone();
+            return match tokio::task::spawn_blocking(move || {
+                proxy_dev_request(&agent, &base, &method, &path_and_query)
+            })
+            .await
+            {
+                Ok(res) => res,
+                Err(e) => plain_response(
+                    StatusCode::BAD_GATEWAY,
+                    format!("Dev server proxy task failed: {e}").into_bytes(),
+                    DEV_PROXY_CSP,
+                ),
+            };
+        }
+
         self.serve_static_asset(&req.method, raw_path)
+    }
+
+    fn active_csp(&self) -> &'static str {
+        #[cfg(feature = "dev-tools")]
+        if self.dev_proxy.is_some() {
+            return DEV_PROXY_CSP;
+        }
+        STRICT_CSP
     }
 
     fn serve_bootstrap(&self, method: &Method) -> ProtocolResponse {
@@ -114,6 +189,7 @@ impl ForgeKernel {
             return plain_response(
                 StatusCode::METHOD_NOT_ALLOWED,
                 b"Method Not Allowed".to_vec(),
+                self.active_csp(),
             );
         }
 
@@ -124,6 +200,59 @@ impl ForgeKernel {
   "use strict";
   const TOKEN = "{token}";
   const RUNTIME = "{runtime_name}";
+  const listeners = new Map();
+
+  function dispatch(event, payload) {{
+    if (event === "__forge:css-reload") {{
+      const stamp = Date.now();
+      document.querySelectorAll('link[rel="stylesheet"]').forEach((link) => {{
+        const href = link.getAttribute("href");
+        if (href) {{
+          const clean = href.split("?")[0];
+          link.setAttribute("href", clean + "?__forge_t=" + stamp);
+        }}
+      }});
+      return;
+    }}
+    if (event === "__forge:reload") {{
+      window.location.reload();
+      return;
+    }}
+    const set = listeners.get(event);
+    if (!set) return;
+    for (const fn of Array.from(set)) {{
+      try {{
+        fn(payload);
+      }} catch (err) {{
+        console.error("[FORGE] listener error on", event, err);
+      }}
+    }}
+  }}
+
+  function listen(event, handler) {{
+    if (typeof event !== "string" || typeof handler !== "function") {{
+      throw new TypeError("forge.listen(event, handler) requires a string and a function");
+    }}
+    let set = listeners.get(event);
+    if (!set) {{
+      set = new Set();
+      listeners.set(event, set);
+    }}
+    set.add(handler);
+    return () => {{
+      set.delete(handler);
+      if (set.size === 0) listeners.delete(event);
+    }};
+  }}
+
+  function once(event, handler) {{
+    const unlisten = listen(event, (payload) => {{
+      unlisten();
+      handler(payload);
+    }});
+    return unlisten;
+  }}
+
   async function invoke(command, payload) {{
     if (typeof command !== "string" || command.length === 0) {{
       const err = new Error("Command name must be a non-empty string");
@@ -150,12 +279,30 @@ impl ForgeKernel {
     }}
     return data;
   }}
+
+  Object.defineProperty(window, "__forge_dispatch", {{
+    value: dispatch,
+    writable: false,
+    configurable: false,
+    enumerable: false
+  }});
+
   Object.defineProperty(window, "forge", {{
-    value: Object.freeze({{ runtime: RUNTIME, invoke }}),
+    value: Object.freeze({{ runtime: RUNTIME, invoke, listen, once }}),
     writable: false,
     configurable: false,
     enumerable: true
   }});
+
+  window.addEventListener("DOMContentLoaded", () => {{
+    invoke("__forge_drain_events").then((queued) => {{
+      if (Array.isArray(queued)) {{
+        for (const [ev, payload] of queued) {{
+          dispatch(ev, payload);
+        }}
+      }}
+    }}).catch(() => {{}});
+  }}, {{ once: true }});
 }})();
 "#
         );
@@ -166,7 +313,7 @@ impl ForgeKernel {
             script.into_bytes()
         };
 
-        let mut headers = security_headers();
+        let mut headers = security_headers(self.active_csp());
         headers.insert(
             CONTENT_TYPE,
             HeaderValue::from_static("text/javascript; charset=utf-8"),
@@ -182,14 +329,15 @@ impl ForgeKernel {
     }
 
     async fn handle_ipc(&self, encoded_cmd: &str, req: ProtocolRequest) -> ProtocolResponse {
+        let csp = self.active_csp();
         if req.method != Method::POST {
             return json_error_response(
                 StatusCode::METHOD_NOT_ALLOWED,
                 &ForgeError::new("FORGE_METHOD_NOT_ALLOWED", "IPC endpoints require POST"),
+                csp,
             );
         }
 
-        // Reject cross-site fetches when the browser supplies Sec-Fetch-Site metadata.
         if let Some(site) = req
             .headers
             .get("sec-fetch-site")
@@ -200,10 +348,10 @@ impl ForgeKernel {
             return json_error_response(
                 StatusCode::FORBIDDEN,
                 &ForgeError::new("FORGE_FORBIDDEN", "cross-origin IPC invocation denied"),
+                csp,
             );
         }
 
-        // Verify per-launch 256-bit capability token in constant time.
         let provided_token = req
             .headers
             .get("x-forge-token")
@@ -216,10 +364,16 @@ impl ForgeKernel {
                     "FORGE_FORBIDDEN",
                     "missing or invalid X-Forge-Token capability header",
                 ),
+                csp,
             );
         }
 
         let cmd_name = percent_decode(encoded_cmd);
+        if cmd_name == "__forge_drain_events" {
+            let events = self.window_handle.mark_js_ready_and_drain_early();
+            return json_ok_response(&json!(events), csp);
+        }
+
         let Some(command) = self.commands.get(cmd_name.as_str()) else {
             return json_error_response(
                 StatusCode::NOT_FOUND,
@@ -227,6 +381,7 @@ impl ForgeKernel {
                     "FORGE_UNKNOWN_COMMAND",
                     format!("unknown command '{cmd_name}'"),
                 ),
+                csp,
             );
         };
 
@@ -242,6 +397,7 @@ impl ForgeKernel {
                             "FORGE_INVALID_PAYLOAD",
                             format!("malformed JSON body: {err}"),
                         ),
+                        csp,
                     );
                 }
             }
@@ -255,54 +411,56 @@ impl ForgeKernel {
 
         let fut = command.call(ctx, payload);
         match CatchUnwindFuture(fut).await {
-            Ok(Ok(reply_value)) => json_ok_response(&reply_value),
-            Ok(Err(forge_err)) => json_error_response(forge_err.status_code(), &forge_err),
+            Ok(Ok(reply_value)) => json_ok_response(&reply_value, csp),
+            Ok(Err(forge_err)) => json_error_response(forge_err.status_code(), &forge_err, csp),
             Err(panic_payload) => {
                 let panic_msg = extract_panic_message(panic_payload);
                 let err = ForgeError::new(
                     "FORGE_HANDLER_PANIC",
                     format!("command '{cmd_name}' panicked: {panic_msg}"),
                 );
-                json_error_response(StatusCode::INTERNAL_SERVER_ERROR, &err)
+                json_error_response(StatusCode::INTERNAL_SERVER_ERROR, &err, csp)
             }
         }
     }
 
     fn serve_static_asset(&self, method: &Method, raw_path: &str) -> ProtocolResponse {
+        let csp = self.active_csp();
         if *method != Method::GET && *method != Method::HEAD {
             return plain_response(
                 StatusCode::METHOD_NOT_ALLOWED,
                 b"Method Not Allowed".to_vec(),
+                csp,
             );
         }
 
         let Some(clean_rel) = sanitize_asset_path(raw_path) else {
-            return plain_response(StatusCode::FORBIDDEN, b"Forbidden".to_vec());
+            return plain_response(StatusCode::FORBIDDEN, b"Forbidden".to_vec(), csp);
         };
 
         let raw_bytes = if let Some(mem_map) = &self.config.in_memory_assets {
             let key = format!("/{clean_rel}");
             match mem_map.get(&key) {
                 Some(bytes) => bytes.clone(),
-                None => return plain_response(StatusCode::NOT_FOUND, b"Not Found".to_vec()),
+                None => return plain_response(StatusCode::NOT_FOUND, b"Not Found".to_vec(), csp),
             }
         } else if let Some(canon_root) = &self.canonical_assets_root {
             let candidate = canon_root.join(&clean_rel);
             let Ok(canon_target) = candidate.canonicalize() else {
-                return plain_response(StatusCode::NOT_FOUND, b"Not Found".to_vec());
+                return plain_response(StatusCode::NOT_FOUND, b"Not Found".to_vec(), csp);
             };
             if !canon_target.starts_with(canon_root) {
-                return plain_response(StatusCode::FORBIDDEN, b"Forbidden".to_vec());
+                return plain_response(StatusCode::FORBIDDEN, b"Forbidden".to_vec(), csp);
             }
             if !canon_target.is_file() {
-                return plain_response(StatusCode::NOT_FOUND, b"Not Found".to_vec());
+                return plain_response(StatusCode::NOT_FOUND, b"Not Found".to_vec(), csp);
             }
             match std::fs::read(&canon_target) {
                 Ok(b) => b,
-                Err(_) => return plain_response(StatusCode::NOT_FOUND, b"Not Found".to_vec()),
+                Err(_) => return plain_response(StatusCode::NOT_FOUND, b"Not Found".to_vec(), csp),
             }
         } else {
-            return plain_response(StatusCode::NOT_FOUND, b"Not Found".to_vec());
+            return plain_response(StatusCode::NOT_FOUND, b"Not Found".to_vec(), csp);
         };
 
         let mime = detect_mime(&clean_rel);
@@ -319,7 +477,7 @@ impl ForgeKernel {
             final_bytes
         };
 
-        let mut headers = security_headers();
+        let mut headers = security_headers(csp);
         headers.insert(CONTENT_TYPE, HeaderValue::from_static(mime));
         headers.insert(CONTENT_LENGTH, HeaderValue::from(content_len));
 
@@ -331,8 +489,142 @@ impl ForgeKernel {
     }
 }
 
-/// Polls an inner future inside `std::panic::catch_unwind` so handler panics are converted
-/// into structured `FORGE_HANDLER_PANIC` responses rather than unwinding across C++/GTK FFI.
+#[cfg(feature = "dev-tools")]
+fn start_live_reload_watcher(
+    watch_root: &Path,
+    window: WindowHandle,
+    tokio_handle: &tokio::runtime::Handle,
+) -> std::result::Result<Box<dyn Send + Sync>, notify::Error> {
+    use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Vec<PathBuf>>();
+    let mut watcher = RecommendedWatcher::new(
+        move |res: notify::Result<notify::Event>| {
+            if let Ok(event) = res {
+                match event.kind {
+                    EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_)
+                        if !event.paths.is_empty() =>
+                    {
+                        let _ = tx.send(event.paths);
+                    }
+                    _ => {}
+                }
+            }
+        },
+        notify::Config::default(),
+    )?;
+
+    watcher.watch(watch_root, RecursiveMode::Recursive)?;
+
+    tokio_handle.spawn(async move {
+        while let Some(mut changed_paths) = rx.recv().await {
+            // Debounce bursty save events across 65ms.
+            tokio::time::sleep(std::time::Duration::from_millis(65)).await;
+            while let Ok(more) = rx.try_recv() {
+                changed_paths.extend(more);
+            }
+            let meaningful: Vec<&Path> = changed_paths
+                .iter()
+                .map(PathBuf::as_path)
+                .filter(|p| {
+                    p.file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| !n.starts_with('.') && !n.ends_with('~'))
+                })
+                .collect();
+            if meaningful.is_empty() {
+                continue;
+            }
+            let css_only = meaningful.iter().all(|p| {
+                p.extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("css"))
+            });
+            let topic = if css_only {
+                "__forge:css-reload"
+            } else {
+                "__forge:reload"
+            };
+            let _ = window.emit(topic, json!({ "count": meaningful.len() }));
+        }
+    });
+
+    Ok(Box::new(watcher))
+}
+
+#[cfg(feature = "dev-tools")]
+fn proxy_dev_request(
+    agent: &ureq::Agent,
+    base_url: &str,
+    method: &Method,
+    path_and_query: &str,
+) -> ProtocolResponse {
+    if *method != Method::GET && *method != Method::HEAD {
+        return plain_response(
+            StatusCode::METHOD_NOT_ALLOWED,
+            b"Method Not Allowed".to_vec(),
+            DEV_PROXY_CSP,
+        );
+    }
+
+    let target_url = format!("{base_url}{path_and_query}");
+    let upstream = match agent.get(&target_url).call() {
+        Ok(res) => res,
+        Err(err) => {
+            return plain_response(
+                StatusCode::BAD_GATEWAY,
+                format!("Failed to reach frontend dev server at {target_url}: {err}").into_bytes(),
+                DEV_PROXY_CSP,
+            );
+        }
+    };
+
+    let status = upstream.status();
+    let content_type = upstream
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/octet-stream")
+        .to_string();
+
+    let raw_bytes = match upstream.into_body().read_to_vec() {
+        Ok(b) => b,
+        Err(err) => {
+            return plain_response(
+                StatusCode::BAD_GATEWAY,
+                format!("Failed to read upstream dev server body: {err}").into_bytes(),
+                DEV_PROXY_CSP,
+            );
+        }
+    };
+
+    let final_bytes = if content_type.starts_with("text/html") {
+        inject_bootstrap_script(&raw_bytes)
+    } else {
+        raw_bytes
+    };
+
+    let content_len = final_bytes.len();
+    let body = if *method == Method::HEAD {
+        Vec::new()
+    } else {
+        final_bytes
+    };
+
+    let mut headers = security_headers(DEV_PROXY_CSP);
+    if let Ok(hv) = HeaderValue::from_str(&content_type) {
+        headers.insert(CONTENT_TYPE, hv);
+    }
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers.insert(CONTENT_LENGTH, HeaderValue::from(content_len));
+
+    ProtocolResponse {
+        status,
+        headers,
+        body,
+    }
+}
+
 struct CatchUnwindFuture<F>(F);
 
 impl<F: Future + Unpin> Future for CatchUnwindFuture<F> {
@@ -494,18 +786,15 @@ fn hex_val(b: u8) -> Option<u8> {
     }
 }
 
-fn security_headers() -> HeaderMap {
+fn security_headers(csp: &'static str) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
-    headers.insert(
-        CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static(DEFAULT_CSP),
-    );
+    headers.insert(CONTENT_SECURITY_POLICY, HeaderValue::from_static(csp));
     headers
 }
 
-fn plain_response(status: StatusCode, body: Vec<u8>) -> ProtocolResponse {
-    let mut headers = security_headers();
+fn plain_response(status: StatusCode, body: Vec<u8>, csp: &'static str) -> ProtocolResponse {
+    let mut headers = security_headers(csp);
     headers.insert(
         CONTENT_TYPE,
         HeaderValue::from_static("text/plain; charset=utf-8"),
@@ -518,9 +807,9 @@ fn plain_response(status: StatusCode, body: Vec<u8>) -> ProtocolResponse {
     }
 }
 
-fn json_ok_response(value: &Value) -> ProtocolResponse {
+fn json_ok_response(value: &Value, csp: &'static str) -> ProtocolResponse {
     let body = serde_json::to_vec(value).unwrap_or_else(|_| b"null".to_vec());
-    let mut headers = security_headers();
+    let mut headers = security_headers(csp);
     headers.insert(
         CONTENT_TYPE,
         HeaderValue::from_static("application/json; charset=utf-8"),
@@ -534,10 +823,14 @@ fn json_ok_response(value: &Value) -> ProtocolResponse {
     }
 }
 
-fn json_error_response(status: StatusCode, err: &ForgeError) -> ProtocolResponse {
+fn json_error_response(
+    status: StatusCode,
+    err: &ForgeError,
+    csp: &'static str,
+) -> ProtocolResponse {
     let body = serde_json::to_vec(err)
         .unwrap_or_else(|_| br#"{"code":"APP_ERROR","message":"serialization failed"}"#.to_vec());
-    let mut headers = security_headers();
+    let mut headers = security_headers(csp);
     headers.insert(
         CONTENT_TYPE,
         HeaderValue::from_static("application/json; charset=utf-8"),

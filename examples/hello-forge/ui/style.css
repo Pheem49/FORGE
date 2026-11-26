@@ -56,6 +56,20 @@ body {
   letter-spacing: -0.02em;
 }
 
+.ver {
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--molten-amber);
+  margin-left: 6px;
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .subtitle {
   margin: 4px 0 0;
   color: var(--mill-scale);
