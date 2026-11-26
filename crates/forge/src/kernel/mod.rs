@@ -34,6 +34,7 @@ pub(crate) struct ForgeKernel {
     pub(crate) permissions: PermissionPolicy,
     pub(crate) permission_warnings: Vec<String>,
     pub(crate) launch_token: String,
+    pub(crate) smoke_test_enabled: bool,
     pub(crate) registry: Arc<WindowRegistry>,
     #[allow(dead_code)]
     pub(crate) tokio_handle: tokio::runtime::Handle,
@@ -132,7 +133,7 @@ impl ForgeKernel {
             None
         };
 
-        let launch_token = generate_launch_token()?;
+        let launch_token = crate::util::random_hex_token::<32>()?;
 
         Ok(Self {
             config: Arc::new(config),
@@ -142,6 +143,7 @@ impl ForgeKernel {
             permissions,
             permission_warnings,
             launch_token,
+            smoke_test_enabled,
             registry,
             tokio_handle,
             #[cfg(feature = "dev-tools")]
@@ -214,19 +216,4 @@ impl ForgeKernel {
         }
         http::STRICT_CSP
     }
-}
-
-fn generate_launch_token() -> Result<String> {
-    let mut bytes = [0u8; 32];
-    getrandom::fill(&mut bytes).map_err(|e| {
-        Error::Runtime(format!(
-            "failed to generate cryptographic launch token: {e}"
-        ))
-    })?;
-    let mut out = String::with_capacity(64);
-    for b in bytes {
-        use std::fmt::Write as _;
-        let _ = write!(&mut out, "{b:02x}");
-    }
-    Ok(out)
 }

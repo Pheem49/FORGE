@@ -128,11 +128,18 @@ export interface ForgeWindowBridge {{
 export interface ForgeBridge {{
   readonly runtime: "webview" | "cef";
   readonly window: ForgeWindowBridge;
-  invoke<N extends keyof ForgeCommandTypes>(
+  invoke<N extends ForgeCommandName>(
     command: N,
-    payload: ForgeCommandTypes[N]["payload"]
-  ): Promise<ForgeCommandTypes[N]["result"]>;
-  invoke<Res = unknown>(command: ForgeCommandName, payload?: unknown): Promise<Res>;
+    ...args: N extends keyof ForgeCommandTypes
+      ? [payload: ForgeCommandTypes[N]["payload"]]
+      : [payload?: unknown]
+  ): Promise<
+    N extends keyof ForgeCommandTypes ? ForgeCommandTypes[N]["result"] : unknown
+  >;
+  invoke<Res = unknown>(
+    command: Exclude<ForgeCommandName, keyof ForgeCommandTypes>,
+    payload?: unknown
+  ): Promise<Res>;
   listen<Payload = unknown>(
     event: string,
     handler: (payload: Payload) => void

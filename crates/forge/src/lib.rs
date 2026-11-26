@@ -8,6 +8,7 @@ pub mod plugins;
 mod runtime;
 pub(crate) mod sandbox;
 pub mod single_instance;
+pub(crate) mod util;
 pub mod window_state;
 
 pub use http;
@@ -159,14 +160,11 @@ impl App {
     }
 
     pub fn run(self) -> Result<()> {
-        if let Some(export_path) = export_commands_env_path() {
-            let exported = self.export_commands()?;
-            write_exported_commands(&export_path, &exported)?;
-            return Ok(());
-        }
-
+        let export_path = export_commands_env_path();
         let early_kind = Config::peek_runtime_kind(&self.root_dir);
-        if let ProcessDisposition::SubprocessExited(_code) = runtime::enter_process(early_kind)? {
+        if export_path.is_none()
+            && let ProcessDisposition::SubprocessExited(_code) = runtime::enter_process(early_kind)?
+        {
             return Ok(());
         }
 
@@ -176,14 +174,21 @@ impl App {
                 message: "do not annotate `fn main()` with `#[tokio::main]`; FORGE manages its own Tokio runtime".into(),
             });
         }
-        if std::thread::current().name() != Some("main") {
+        if export_path.is_none() && std::thread::current().name() != Some("main") {
             return Err(Error::NotMainThread);
         }
 
         let tokio_rt = build_tokio_runtime()?;
-        let (kernel, commands_rx) = self.build_kernel(tokio_rt.handle().clone())?;
-        let active_kind = kernel.config.runtime.default;
+        let (kernel, commands_rx, exported_list) =
+            self.build_kernel(tokio_rt.handle().clone(), false, export_path.is_some())?;
 
+        if let Some(dest) = export_path {
+            write_exported_commands(&dest, &exported_list)?;
+            drop(tokio_rt);
+            return Ok(());
+        }
+
+        let active_kind = kernel.config.runtime.default;
         if active_kind != early_kind
             && let ProcessDisposition::SubprocessExited(_code) =
                 runtime::enter_process(active_kind)?
@@ -228,11 +233,6 @@ impl App {
 
     pub fn headless(self) -> Result<HeadlessApp> {
         let export_path = export_commands_env_path();
-        if let Some(path) = &export_path {
-            let exported = self.collect_exported_commands();
-            write_exported_commands(path, &exported)?;
-        }
-
         let (handle, owned_rt) = match tokio::runtime::Handle::try_current() {
             Ok(h) => (h, None),
             Err(_) => {
@@ -240,7 +240,11 @@ impl App {
                 (rt.handle().clone(), Some(rt))
             }
         };
-        let (kernel, commands_rx) = self.build_kernel(handle)?;
+        let (kernel, commands_rx, exported_list) =
+            self.build_kernel(handle, true, export_path.is_some())?;
+        if let Some(path) = &export_path {
+            write_exported_commands(path, &exported_list)?;
+        }
         Ok(HeadlessApp::new(kernel, commands_rx, owned_rt))
     }
 
@@ -284,9 +288,12 @@ impl App {
     fn build_kernel(
         self,
         tokio_handle: tokio::runtime::Handle,
+        is_headless: bool,
+        exporting_commands: bool,
     ) -> Result<(
         Arc<ForgeKernel>,
         tokio::sync::mpsc::UnboundedReceiver<HostCommand>,
+        Vec<ExportedCommand>,
     )> {
         let mut config = Config::load_from_root(&self.root_dir)?;
         for hook in self.config_hooks {
@@ -311,14 +318,29 @@ impl App {
         }
         kernel::builtins::insert_builtin_commands(&mut command_map);
 
+        let user_set: std::collections::HashSet<&str> =
+            user_command_names.iter().copied().collect();
+        let mut exported_list: Vec<ExportedCommand> = command_map
+            .keys()
+            .map(|&name| ExportedCommand {
+                name: name.to_string(),
+                builtin: !user_set.contains(name),
+            })
+            .collect();
+        exported_list.sort_by(|a, b| a.name.cmp(&b.name));
+
         let all_registered: Vec<&str> = command_map.keys().copied().collect();
         let permissions = kernel::permissions::PermissionPolicy::compile(&config.permissions)?;
-        let permission_warnings = permissions.validate(&all_registered, &user_command_names)?;
+        let permission_warnings = if exporting_commands {
+            Vec::new()
+        } else {
+            permissions.validate(&all_registered, &user_command_names)?
+        };
         for warn in &permission_warnings {
             eprintln!("[FORGE] warning: {warn}");
         }
 
-        let (registry, commands_rx) = WindowRegistry::new(&config);
+        let (registry, commands_rx) = WindowRegistry::new(&config, is_headless);
         let app_handle = AppHandle::new(Arc::clone(&registry));
         let main_window = match registry.window_handle("main") {
             Some(w) => w,
@@ -370,7 +392,7 @@ impl App {
             tokio_handle,
         )?;
 
-        Ok((Arc::new(kernel), commands_rx))
+        Ok((Arc::new(kernel), commands_rx, exported_list))
     }
 }
 

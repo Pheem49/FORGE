@@ -22,7 +22,7 @@ height = 800
 remember_state = true
 ```
 
-### Rust API (`forge::window_state`)
+### Rust Interface (`forge::window_state`)
 
 - `Config::with_state_dir(&mut self, dir)` — Redirects state storage in tests.
 - `SavedWindowGeometry::clamp_to_monitor(MonitorBounds)` — Clamps off-screen coordinates when an external monitor is unplugged.

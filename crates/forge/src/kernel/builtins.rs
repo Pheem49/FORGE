@@ -5,15 +5,26 @@ use std::sync::Arc;
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::config::{AppConfig, RuntimeKind};
 use crate::error::ForgeError;
 use crate::handler::{CommandEntry, CommandHandler, ErasedCommand};
 use crate::runtime::{AppHandle, WindowHandle, WindowOptions};
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
-struct BoolReq {
+struct MinimizeReq {
     minimized: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct MaximizeReq {
     maximized: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct FullscreenReq {
     fullscreen: Option<bool>,
 }
 
@@ -86,7 +97,7 @@ async fn builtin_window_close(win: WindowHandle) -> Result<(), Infallible> {
 
 async fn builtin_window_minimize(
     win: WindowHandle,
-    req: Option<BoolReq>,
+    req: Option<MinimizeReq>,
 ) -> Result<(), Infallible> {
     let next = req.and_then(|r| r.minimized).unwrap_or(true);
     win.set_minimized(next);
@@ -95,7 +106,7 @@ async fn builtin_window_minimize(
 
 async fn builtin_window_maximize(
     win: WindowHandle,
-    req: Option<BoolReq>,
+    req: Option<MaximizeReq>,
 ) -> Result<(), Infallible> {
     let next = req
         .and_then(|r| r.maximized)
@@ -106,7 +117,7 @@ async fn builtin_window_maximize(
 
 async fn builtin_window_fullscreen(
     win: WindowHandle,
-    req: Option<BoolReq>,
+    req: Option<FullscreenReq>,
 ) -> Result<(), Infallible> {
     let next = req
         .and_then(|r| r.fullscreen)
@@ -135,7 +146,12 @@ async fn builtin_window_focus(win: WindowHandle) -> Result<(), Infallible> {
     Ok(())
 }
 
-async fn builtin_window_drag(win: WindowHandle) -> Result<(), Infallible> {
+async fn builtin_window_drag(cfg: AppConfig, win: WindowHandle) -> Result<(), ForgeError> {
+    if cfg.runtime.default == RuntimeKind::Cef {
+        return Err(ForgeError::unsupported(
+            "window.start_dragging is not supported on the CEF runtime",
+        ));
+    }
     win.drag_window();
     Ok(())
 }

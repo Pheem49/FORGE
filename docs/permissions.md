@@ -6,7 +6,7 @@ Starting in **FORGE v0.3**, IPC command permissions are **strictly enforced by d
 
 ## 1. Purpose & Security Model
 
-Without capability boundaries, any XSS or untrusted script inside a WebView or Chromium frame can invoke every registered backend command. FORGE enforces a declarative, single-choke-point policy in `kernel/ipc.rs`:
+Without capability rules, any XSS or untrusted script inside a WebView or Chromium frame can invoke every registered backend command. FORGE enforces a declarative, single-choke-point policy in `kernel/ipc.rs`:
 
 - **Default-Deny:** When `[permissions]` is omitted from `forge.toml`, FORGE defaults to `mode = "enforce"` with `allow = []`. Unlisted commands fail with HTTP `403` and `code = "FORGE_PERMISSION_DENIED"`.
 - **Deny Always Wins:** Any command matching `deny` is blocked even if matched by `"*"` or `"namespace.*"`.

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::sandbox::Sandbox;
+use crate::util::sanitize_identifier;
 
 const STATE_FILE_NAME: &str = "window-state.json";
 
@@ -92,16 +93,7 @@ impl WindowStateStore {
 }
 
 fn default_state_dir(identifier: &str) -> Option<PathBuf> {
-    let safe_id: String = identifier
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
+    let safe_id = sanitize_identifier(identifier);
     #[cfg(any(feature = "webview", feature = "cef", feature = "plugin-fs"))]
     {
         let base = dirs::data_local_dir()

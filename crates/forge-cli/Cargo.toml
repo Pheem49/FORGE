@@ -10,6 +10,7 @@ homepage.workspace = true
 readme = "../../README.md"
 keywords = ["desktop", "gui", "bundler", "cef", "webview"]
 categories = ["command-line-utilities", "development-tools::build-utils"]
+exclude = ["/target", "/dist"]
 
 [[bin]]
 name = "forge"

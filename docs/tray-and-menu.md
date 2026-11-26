@@ -42,7 +42,7 @@ items = [
 ]
 ```
 
-### Rust & Headless Testing API
+### Rust & Headless Testing Interface
 
 - `AppHandle::set_tray(TrayConfig) -> Result<(), ForgeError>`
 - `AppHandle::set_menu(MenuConfig) -> Result<(), ForgeError>`

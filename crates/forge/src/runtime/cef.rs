@@ -214,16 +214,7 @@ fn init_cef_api_version() -> Result<()> {
 }
 
 fn resolve_profile_cache_dir(identifier: &str) -> std::path::PathBuf {
-    let safe_id: String = identifier
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
+    let safe_id = crate::util::sanitize_identifier(identifier);
     dirs::cache_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join("forge")
@@ -541,16 +532,15 @@ cef::wrap_scheme_handler_factory! {
             _scheme_name: Option<&CefString>,
             _request: Option<&mut Request>,
         ) -> Option<ResourceHandler> {
-            let window_label = browser
-                .as_ref()
-                .map(|b| b.identifier())
-                .and_then(|bid| {
-                    self.host_state
-                        .lock()
-                        .ok()
-                        .and_then(|g| g.browser_id_to_label.get(&bid).cloned())
-                })
-                .unwrap_or_else(|| "main".to_string());
+            let window_label = match browser.as_ref().map(|b| b.identifier()) {
+                Some(bid) => self
+                    .host_state
+                    .lock()
+                    .ok()
+                    .and_then(|g| g.browser_id_to_label.get(&bid).cloned())
+                    .unwrap_or_else(|| "__closed__".to_string()),
+                None => "main".to_string(),
+            };
 
             Some(ForgeResourceHandler::new(
                 Arc::clone(&self.kernel),

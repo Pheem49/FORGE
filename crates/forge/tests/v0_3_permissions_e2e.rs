@@ -47,9 +47,14 @@ async fn enforces_deny_by_default_when_permissions_section_is_omitted() {
         .unwrap_err();
     assert_eq!(win_err.code, codes::PERMISSION_DENIED);
 
-    // 3. Internal `__forge_drain_events` bypasses `[permissions]` so bootstrap always works
+    // 3. Internal `__forge_drain_events` bypasses `[permissions]` so bootstrap always works,
+    // whereas `__forge_ready` is blocked outside `FORGE_SMOKE_TEST=1` so untrusted frames cannot quit!
     let drained: Vec<Value> = app.invoke_unit("__forge_drain_events").await.unwrap();
     assert!(drained.is_empty());
+
+    let ready_err = app.invoke_unit::<Value>("__forge_ready").await.unwrap_err();
+    assert_eq!(ready_err.code, codes::PERMISSION_DENIED);
+    assert!(!app.is_closed());
 }
 
 #[tokio::test]
@@ -104,6 +109,14 @@ async fn evaluates_globs_deny_precedence_and_per_window_overrides() {
         .unwrap_err();
     assert_eq!(settings_denied.code, codes::PERMISSION_DENIED);
     assert_eq!(settings_denied.details.unwrap()["window"], "settings");
+
+    // Unknown or already-closed secondary windows NEVER fall back or escalate to `"main"`!
+    let closed_err = app
+        .invoke_as::<_, String>("closed-window", "notes.read", Value::Null)
+        .await
+        .unwrap_err();
+    assert_eq!(closed_err.code, codes::WINDOW_NOT_FOUND);
+    assert_eq!(closed_err.kind(), ErrorKind::NotFound);
 }
 
 #[test]

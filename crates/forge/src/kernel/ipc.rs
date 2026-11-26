@@ -13,6 +13,7 @@ use super::http::{json_error_response, json_ok_response};
 use crate::error::{ForgeError, codes};
 use crate::handler::InvokeContext;
 use crate::runtime::{AppHandle, ProtocolRequest, ProtocolResponse};
+use crate::util::constant_time_eq;
 
 impl ForgeKernel {
     pub(super) async fn handle_ipc(
@@ -62,20 +63,25 @@ impl ForgeKernel {
             );
         }
 
-        let calling_window = self
-            .registry
-            .window_handle(&req.window)
-            .or_else(|| self.registry.window_handle("main"));
+        // Strict window resolution: never fall back to `"main"` if a secondary window closed or
+        // an unmapped frame issued a request, preventing per-window permission escalation.
+        let Some(window) = self.registry.window_handle(&req.window) else {
+            return json_error_response(
+                StatusCode::NOT_FOUND,
+                &ForgeError::not_found(
+                    codes::WINDOW_NOT_FOUND,
+                    format!("calling window '{}' is not open", req.window),
+                ),
+                csp,
+            );
+        };
 
         let cmd_name = percent_decode(encoded_cmd);
         if cmd_name == "__forge_drain_events" {
-            let events = calling_window
-                .as_ref()
-                .map(|w| w.mark_js_ready_and_drain_early())
-                .unwrap_or_default();
+            let events = window.mark_js_ready_and_drain_early();
             return json_ok_response(&json!(events), csp);
         }
-        if cmd_name == "__forge_ready" {
+        if self.smoke_test_enabled && cmd_name == "__forge_ready" {
             let ua = serde_json::from_slice::<Value>(&req.body)
                 .ok()
                 .and_then(|v| v.get("ua").and_then(Value::as_str).map(String::from))
@@ -87,17 +93,6 @@ impl ForgeKernel {
             self.registry.quit();
             return json_ok_response(&json!({ "ok": true }), csp);
         }
-
-        let Some(window) = calling_window else {
-            return json_error_response(
-                StatusCode::NOT_FOUND,
-                &ForgeError::not_found(
-                    codes::WINDOW_NOT_FOUND,
-                    format!("calling window '{}' is no longer open", req.window),
-                ),
-                csp,
-            );
-        };
 
         // Single permission choke point: evaluated for every command (user, plugin, and built-in).
         if let Err(perm_err) = self.permissions.check(window.label(), &cmd_name) {
@@ -179,15 +174,4 @@ fn extract_panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
     } else {
         "unknown panic".to_string()
     }
-}
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff = 0u8;
-    for (&x, &y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    diff == 0
 }

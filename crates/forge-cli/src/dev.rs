@@ -36,12 +36,10 @@ pub trait ProcessRunner {
     }
 
     /// Runs a read-only probe command (`pkg-config --exists ...`, `<tool> --version`) and returns
-    /// `true` when it exits with status `0`.
-    fn probe_tool(&self, program: &str, args: &[&str]) -> bool {
-        Command::new(program)
-            .args(args)
-            .output()
-            .is_ok_and(|o| o.status.success())
+    /// `true` when it exits with status `0`. Test runners default to `false` so no real OS
+    /// processes are spawned unless explicitly simulated.
+    fn probe_tool(&self, _program: &str, _args: &[&str]) -> bool {
+        false
     }
 }
 
@@ -50,6 +48,12 @@ pub trait ProcessRunner {
 pub struct OsProcessRunner;
 
 impl ProcessRunner for OsProcessRunner {
+    fn probe_tool(&self, program: &str, args: &[&str]) -> bool {
+        Command::new(program)
+            .args(args)
+            .output()
+            .is_ok_and(|o| o.status.success())
+    }
     fn run(&self, spec: &CommandSpec) -> Result<i32> {
         let status = Command::new(&spec.program)
             .args(&spec.args)

@@ -10,6 +10,7 @@ homepage.workspace = true
 readme = "../../README.md"
 keywords = ["desktop", "gui", "webview", "cef", "chromium"]
 categories = ["gui", "web-programming"]
+exclude = ["/target", "/dist"]
 
 [lib]
 name = "forge"

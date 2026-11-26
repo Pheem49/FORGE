@@ -11,6 +11,7 @@ use fd_lock::{RwLock, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
+use crate::util::{constant_time_eq, random_hex_token, sanitize_identifier};
 
 /// Payload delivered via the `app:second-instance` push event when a duplicate instance launches.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -95,16 +96,7 @@ impl SingleInstanceGuard {
             ))
         })?;
 
-        let safe_id: String = identifier
-            .chars()
-            .map(|c| {
-                if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .collect();
+        let safe_id = sanitize_identifier(identifier);
         let lock_path = lock_dir.join(format!("{safe_id}.lock"));
         let endpoint_path = lock_dir.join(format!("{safe_id}.endpoint"));
 
@@ -139,7 +131,7 @@ impl SingleInstanceGuard {
                     .local_addr()
                     .map_err(|e| Error::Runtime(format!("failed to read listener port: {e}")))?
                     .port();
-                let token = random_hex_token()?;
+                let token = random_hex_token::<16>()?;
                 write_restricted_endpoint(
                     &endpoint_path,
                     &EndpointInfo {
@@ -251,27 +243,4 @@ fn write_restricted_endpoint(path: &Path, info: &EndpointInfo) -> Result<()> {
             .map_err(|e| Error::Runtime(format!("failed to write endpoint file: {e}")))?;
     }
     Ok(())
-}
-
-fn random_hex_token() -> Result<String> {
-    let mut bytes = [0u8; 16];
-    getrandom::fill(&mut bytes)
-        .map_err(|e| Error::Runtime(format!("failed to generate single-instance token: {e}")))?;
-    let mut out = String::with_capacity(32);
-    for b in bytes {
-        use std::fmt::Write as _;
-        let _ = write!(&mut out, "{b:02x}");
-    }
-    Ok(out)
-}
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff = 0u8;
-    for (&x, &y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    diff == 0
 }

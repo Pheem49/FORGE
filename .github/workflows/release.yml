@@ -80,3 +80,4 @@ jobs:
         with:
           files: |
             release-dist/${{ matrix.artifact_prefix }}/*.*
+            release-dist/${{ matrix.artifact_prefix }}/SHA256SUMS

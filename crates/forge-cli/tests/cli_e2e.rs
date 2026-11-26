@@ -68,6 +68,17 @@ impl ProcessRunner for RecordingRunner {
         }
         Ok(0)
     }
+
+    fn probe_tool(&self, program: &str, _args: &[&str]) -> bool {
+        if program == "dpkg-deb" {
+            Command::new("dpkg-deb")
+                .arg("--version")
+                .output()
+                .is_ok_and(|o| o.status.success())
+        } else {
+            matches!(program, "patchelf" | "strip")
+        }
+    }
 }
 
 #[test]

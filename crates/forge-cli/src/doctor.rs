@@ -149,6 +149,31 @@ pub fn run_doctor<R: ProcessRunner>(opts: &DoctorOptions, runner: &R) -> DoctorR
             "system tray library",
             "sudo apt install libayatana-appindicator3-dev",
         ));
+    } else if cfg!(target_os = "windows") {
+        let has_wv2 = runner.probe_tool(
+            "reg",
+            &[
+                "query",
+                r"HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+                "/v",
+                "pv",
+            ],
+        ) || runner.probe_tool(
+            "reg",
+            &[
+                "query",
+                r"HKCU\Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+                "/v",
+                "pv",
+            ],
+        );
+        checks.push(make_check(
+            "WebView2 Evergreen Runtime",
+            has_wv2,
+            webview_required,
+            "Edge WebView2",
+            "https://go.microsoft.com/fwlink/p/?LinkId=2124703",
+        ));
     }
 
     // 3. Chromium CEF Toolchain & Local Binary Cache

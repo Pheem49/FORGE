@@ -277,6 +277,7 @@ struct RegistryInner {
     tray: Option<TrayConfig>,
     menu: Option<MenuConfig>,
     runtime_kind: RuntimeKind,
+    is_headless: bool,
     exit_on_last_close: bool,
     state_store: Option<WindowStateStore>,
 }
@@ -289,7 +290,10 @@ pub(crate) struct WindowRegistry {
 }
 
 impl WindowRegistry {
-    pub(crate) fn new(config: &Config) -> (Arc<Self>, mpsc::UnboundedReceiver<HostCommand>) {
+    pub(crate) fn new(
+        config: &Config,
+        is_headless: bool,
+    ) -> (Arc<Self>, mpsc::UnboundedReceiver<HostCommand>) {
         let (tx, rx) = mpsc::unbounded_channel();
         let state_store = WindowStateStore::for_identifier(
             &config.app.identifier,
@@ -342,6 +346,7 @@ impl WindowRegistry {
                 tray,
                 menu,
                 runtime_kind: config.runtime.default,
+                is_headless,
                 exit_on_last_close: config.app.exit_on_last_window_close,
                 state_store,
             }),
@@ -481,6 +486,11 @@ impl WindowRegistry {
                     "system tray is not supported on the CEF runtime (use runtime = \"webview\")",
                 ));
             }
+            if !cfg!(feature = "desktop-ui") && !guard.is_headless {
+                return Err(ForgeError::unsupported(
+                    "Cargo feature 'forge/desktop-ui' must be enabled to use system tray",
+                ));
+            }
             guard.tray = Some(tray.clone());
         }
         let _ = self.tx.send(HostCommand::SetTray(tray));
@@ -496,6 +506,11 @@ impl WindowRegistry {
             if guard.runtime_kind == RuntimeKind::Cef {
                 return Err(ForgeError::unsupported(
                     "native application menu is not supported on the CEF runtime (use runtime = \"webview\")",
+                ));
+            }
+            if !cfg!(feature = "desktop-ui") && !guard.is_headless {
+                return Err(ForgeError::unsupported(
+                    "Cargo feature 'forge/desktop-ui' must be enabled to use native menus",
                 ));
             }
             guard.menu = Some(menu.clone());

@@ -50,33 +50,6 @@ impl BundleTarget for MacAppTarget {
             }
         })?;
 
-        if app.runtime == RuntimeChoice::Cef
-            && let Some(cef_dir) = &app.cef_dir
-        {
-            if runner.has_tool("bundle-cef-app") {
-                let _ = runner.run(&CommandSpec {
-                    program: "bundle-cef-app".to_string(),
-                    args: vec![
-                        "--cef-path".to_string(),
-                        cef_dir.to_string_lossy().into_owned(),
-                        app_bundle.to_string_lossy().into_owned(),
-                    ],
-                    current_dir: app.project_root.clone(),
-                    env: BTreeMap::new(),
-                });
-            } else {
-                let frameworks_dir = contents.join("Frameworks");
-                create_dir_all(&frameworks_dir)?;
-                let fw_src = cef_dir.join("Chromium Embedded Framework.framework");
-                if fw_src.is_dir() {
-                    copy_dir_all(
-                        &fw_src,
-                        &frameworks_dir.join("Chromium Embedded Framework.framework"),
-                    )?;
-                }
-            }
-        }
-
         let copyright = app
             .manifest
             .bundle
@@ -123,6 +96,39 @@ impl BundleTarget for MacAppTarget {
             path: plist_path,
             message: format!("failed to write Info.plist: {e}"),
         })?;
+
+        if app.runtime == RuntimeChoice::Cef
+            && let Some(cef_dir) = &app.cef_dir
+        {
+            if runner.has_tool("bundle-cef-app") {
+                let code = runner.run(&CommandSpec {
+                    program: "bundle-cef-app".to_string(),
+                    args: vec![
+                        "--cef-path".to_string(),
+                        cef_dir.to_string_lossy().into_owned(),
+                        app_bundle.to_string_lossy().into_owned(),
+                    ],
+                    current_dir: app.project_root.clone(),
+                    env: BTreeMap::new(),
+                })?;
+                if code != 0 {
+                    return Err(CliError::ProcessFailed {
+                        command: "bundle-cef-app".to_string(),
+                        code,
+                    });
+                }
+            } else {
+                let frameworks_dir = contents.join("Frameworks");
+                create_dir_all(&frameworks_dir)?;
+                let fw_src = cef_dir.join("Chromium Embedded Framework.framework");
+                if fw_src.is_dir() {
+                    copy_dir_all(
+                        &fw_src,
+                        &frameworks_dir.join("Chromium Embedded Framework.framework"),
+                    )?;
+                }
+            }
+        }
 
         Ok(app_bundle)
     }
