@@ -6,11 +6,11 @@ use serde_json::json;
 
 use super::assets::inject_bootstrap_script;
 use super::http::{DEV_PROXY_CSP, plain_response, security_headers};
-use crate::runtime::{ProtocolResponse, WindowHandle};
+use crate::runtime::{AppHandle, ProtocolResponse};
 
 pub(super) fn start_live_reload_watcher(
     watch_root: &Path,
-    window: WindowHandle,
+    app_handle: AppHandle,
     tokio_handle: &tokio::runtime::Handle,
 ) -> std::result::Result<Box<dyn Send + Sync>, notify::Error> {
     use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -63,7 +63,7 @@ pub(super) fn start_live_reload_watcher(
             } else {
                 "__forge:reload"
             };
-            let _ = window.emit(topic, json!({ "count": meaningful.len() }));
+            let _ = app_handle.emit_all(topic, json!({ "count": meaningful.len() }));
         }
     });
 

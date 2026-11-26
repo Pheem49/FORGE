@@ -6,7 +6,7 @@ publish = false
 
 [features]
 default = ["webview"]
-webview = ["forge/webview", "forge/dev-tools", "forge/plugins"]
+webview = ["forge/webview", "forge/dev-tools", "forge/plugins", "forge/desktop-ui"]
 cef = ["forge/cef", "forge/dev-tools", "forge/plugins"]
 
 [dependencies]

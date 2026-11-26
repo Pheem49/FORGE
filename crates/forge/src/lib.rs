@@ -7,18 +7,22 @@ pub mod manifest;
 pub mod plugins;
 mod runtime;
 pub(crate) mod sandbox;
+pub mod single_instance;
+pub mod window_state;
 
 pub use http;
 pub use tokio;
 
 pub use config::{
-    AppConfig, AppMetaConfig, Config, DevConfig, RuntimeConfig, RuntimeKind, WindowConfig,
+    AppConfig, AppMetaConfig, Config, DevConfig, Manifest, MenuConfig, MenuItemConfig,
+    RuntimeConfig, RuntimeKind, SubmenuConfig, TrayConfig, WindowConfig,
 };
 pub use error::{Error, ErrorKind, ForgeError, Result, codes};
 pub use handler::{CommandHandler, FromContext, State};
 pub use headless::{HeadlessApp, RawResponse};
-pub use manifest::Manifest;
-pub use runtime::WindowHandle;
+pub use runtime::{AppHandle, WindowHandle, WindowOptions};
+pub use single_instance::{AcquireOutcome, SecondInstancePayload, SingleInstanceGuard};
+pub use window_state::{MonitorBounds, SavedWindowGeometry, WindowStateStore};
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -27,7 +31,7 @@ use std::sync::Arc;
 
 use handler::{CommandEntry, ErasedCommand, StateMap};
 use kernel::ForgeKernel;
-use runtime::ProcessDisposition;
+use runtime::{HostCommand, ProcessDisposition, WindowRegistry};
 
 type SetupHook = Box<dyn FnOnce(&mut SetupContext) -> Result<()> + Send + 'static>;
 type ConfigHook = Box<dyn FnOnce(&mut Config) + Send + 'static>;
@@ -42,6 +46,7 @@ pub trait Plugin {
 pub struct SetupContext<'a> {
     states: &'a mut StateMap,
     config: &'a Config,
+    app_handle: AppHandle,
     window: WindowHandle,
     tokio_handle: &'a tokio::runtime::Handle,
 }
@@ -57,8 +62,12 @@ impl<'a> SetupContext<'a> {
         self.config
     }
 
-    /// Returns a thread-safe [`WindowHandle`] so background tasks spawned during setup
-    /// can emit events (`window.emit(...)`) or update window state.
+    /// Returns an [`AppHandle`] capable of creating windows, broadcasting events, or configuring tray/menus.
+    pub fn app_handle(&self) -> AppHandle {
+        self.app_handle.clone()
+    }
+
+    /// Returns a thread-safe [`WindowHandle`] for the primary `"main"` window.
     pub fn window(&self) -> WindowHandle {
         self.window.clone()
     }
@@ -165,7 +174,7 @@ impl App {
         }
 
         let tokio_rt = build_tokio_runtime()?;
-        let (kernel, directives) = self.build_kernel(tokio_rt.handle().clone())?;
+        let (kernel, commands_rx) = self.build_kernel(tokio_rt.handle().clone())?;
         let active_kind = kernel.config.runtime.default;
 
         if active_kind != early_kind
@@ -176,7 +185,36 @@ impl App {
             return Ok(());
         }
 
-        let res = runtime::run_host(active_kind, kernel, directives);
+        let _single_instance_guard = if kernel.config.app.single_instance {
+            let lock_dir = SingleInstanceGuard::default_lock_dir();
+            let args: Vec<String> = std::env::args().collect();
+            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            let app_handle = AppHandle::new(Arc::clone(&kernel.registry));
+
+            match SingleInstanceGuard::acquire(
+                &lock_dir,
+                &kernel.config.app.identifier,
+                args,
+                cwd,
+                move |payload| {
+                    if let Some(main_win) = app_handle.window("main") {
+                        main_win.show();
+                        main_win.focus();
+                    }
+                    let _ = app_handle.emit_all("app:second-instance", payload);
+                },
+            )? {
+                AcquireOutcome::Primary(guard) => Some(guard),
+                AcquireOutcome::SecondaryForwarded => {
+                    drop(tokio_rt);
+                    return Ok(());
+                }
+            }
+        } else {
+            None
+        };
+
+        let res = runtime::run_host(active_kind, kernel, commands_rx);
         drop(tokio_rt);
         res
     }
@@ -189,8 +227,8 @@ impl App {
                 (rt.handle().clone(), Some(rt))
             }
         };
-        let (kernel, directives) = self.build_kernel(handle)?;
-        Ok(HeadlessApp::new(kernel, directives, owned_rt))
+        let (kernel, commands_rx) = self.build_kernel(handle)?;
+        Ok(HeadlessApp::new(kernel, commands_rx, owned_rt))
     }
 
     fn build_kernel(
@@ -198,7 +236,7 @@ impl App {
         tokio_handle: tokio::runtime::Handle,
     ) -> Result<(
         Arc<ForgeKernel>,
-        tokio::sync::mpsc::UnboundedReceiver<runtime::HostDirective>,
+        tokio::sync::mpsc::UnboundedReceiver<HostCommand>,
     )> {
         let mut config = Config::load_from_root(&self.root_dir)?;
         for hook in self.config_hooks {
@@ -206,7 +244,7 @@ impl App {
         }
 
         let mut command_map: HashMap<&'static str, Arc<dyn ErasedCommand>> =
-            HashMap::with_capacity(self.commands.len());
+            HashMap::with_capacity(self.commands.len() + 16);
         for (name, cmd) in self.commands {
             if name.trim().is_empty()
                 || name.starts_with("__forge")
@@ -219,11 +257,22 @@ impl App {
                 return Err(Error::DuplicateCommand { command: name });
             }
         }
+        kernel::builtins::insert_builtin_commands(&mut command_map);
 
-        let (window_handle, directives) = WindowHandle::new(
-            config.window.title.clone(),
-            (config.window.width, config.window.height),
-        );
+        let (registry, commands_rx) = WindowRegistry::new(&config);
+        let app_handle = AppHandle::new(Arc::clone(&registry));
+        let main_window = match registry.window_handle("main") {
+            Some(w) => w,
+            None => app_handle
+                .create_window(
+                    "main",
+                    WindowOptions::from_window_config(&config.window).visible(false),
+                )
+                .map_err(|e| Error::Config {
+                    path: None,
+                    message: e.message,
+                })?,
+        };
 
         let mut states = StateMap::default();
         {
@@ -231,7 +280,8 @@ impl App {
             let mut setup_ctx = SetupContext {
                 states: &mut states,
                 config: &config,
-                window: window_handle.clone(),
+                app_handle,
+                window: main_window,
                 tokio_handle: &tokio_handle,
             };
             for hook in self.setup_hooks {
@@ -255,11 +305,11 @@ impl App {
             config,
             states,
             command_map,
-            window_handle,
+            registry,
             tokio_handle,
         )?;
 
-        Ok((Arc::new(kernel), directives))
+        Ok((Arc::new(kernel), commands_rx))
     }
 }
 

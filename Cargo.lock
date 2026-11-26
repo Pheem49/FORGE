@@ -854,6 +854,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "caf1079563223d5d59d83c85886a56e586cfd5c1a26292e971a0fa266531ac5a"
 
 [[package]]
+name = "fd-lock"
+version = "4.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ce92ff622d6dadf7349484f42c93271a0d49b7cc4d466a936405bacbe10aa78"
+dependencies = [
+ "cfg-if",
+ "rustix",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
 name = "fdeflate"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -939,9 +950,12 @@ dependencies = [
  "arboard",
  "cef",
  "dirs",
+ "fd-lock",
  "flate2",
  "getrandom 0.4.3",
  "http",
+ "image",
+ "muda",
  "notify",
  "notify-rust",
  "rfd",
@@ -952,6 +966,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml",
+ "tray-icon",
  "ureq",
  "wry",
 ]
@@ -1658,6 +1673,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "keyboard-types"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fbe853b403ae61a04233030ae8a79d94975281ed9770a1f9e246732b534b28d"
+dependencies = [
+ "bitflags",
+ "serde",
+]
+
+[[package]]
 name = "kqueue"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1675,6 +1700,26 @@ checksum = "07293a4e297ac234359b510362495713f75ea345d5307140414f20c69ffeb087"
 dependencies = [
  "bitflags",
  "libc",
+]
+
+[[package]]
+name = "libappindicator"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f57fd42f20edd22ee374ebcedda7bdecd1d5d1e76f11880d9ff2898ed2150d76"
+dependencies = [
+ "gtk",
+ "libappindicator-sys",
+]
+
+[[package]]
+name = "libappindicator-sys"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b76d3d67eb285f611b14654cd097f52eb7e83acc2b59913147f8ac695b61149"
+dependencies = [
+ "gtk-sys",
+ "libloading 0.9.1",
 ]
 
 [[package]]
@@ -1840,6 +1885,26 @@ checksum = "bb85c154ba489f01b25c0d36ae69a87e4a1c73a72631fc6c0eb6dde34a73e44b"
 dependencies = [
  "num-traits",
  "pxfm",
+]
+
+[[package]]
+name = "muda"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a775675be5389020a44c56efbdf3bbea8b97f47dfdd325e6c5c5213797a7e0aa"
+dependencies = [
+ "crossbeam-channel",
+ "dpi",
+ "gtk",
+ "keyboard-types",
+ "libc",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-core-foundation",
+ "objc2-foundation",
+ "png",
+ "thiserror 2.0.21",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3185,6 +3250,26 @@ name = "toml_writer"
 version = "1.2.0+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "009dbb7700f11c55ef83aebbe4c0e9cf1f1ac0844bd8d6f00dc38f302026e13a"
+
+[[package]]
+name = "tray-icon"
+version = "0.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19886363e700addca09f3787a1394eda88a80c89b9305f96effb9ea5ce09146d"
+dependencies = [
+ "crossbeam-channel",
+ "dirs",
+ "libappindicator",
+ "muda",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-foundation",
+ "png",
+ "thiserror 2.0.21",
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "typenum"

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::Read;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
@@ -10,7 +10,8 @@ use tar::Archive;
 
 use crate::error::{Error, Result};
 pub use crate::manifest::{
-    AppMetaConfig, DevConfig, Manifest, RuntimeConfig, RuntimeKind, WindowConfig,
+    AppMetaConfig, DevConfig, Manifest, MenuConfig, MenuItemConfig, RuntimeConfig, RuntimeKind,
+    SubmenuConfig, TrayConfig, WindowConfig,
 };
 
 /// Resolved configuration for a FORGE application.
@@ -19,10 +20,15 @@ pub use crate::manifest::{
 pub struct Config {
     pub app: AppMetaConfig,
     pub window: WindowConfig,
+    pub windows: BTreeMap<String, WindowConfig>,
     pub runtime: RuntimeConfig,
     pub dev: DevConfig,
+    pub tray: Option<TrayConfig>,
+    pub menu: Option<MenuConfig>,
     #[serde(skip)]
     pub(crate) in_memory_assets: Option<HashMap<String, Vec<u8>>>,
+    #[serde(skip)]
+    pub(crate) explicit_state_dir: Option<PathBuf>,
 }
 
 impl From<Manifest> for Config {
@@ -30,9 +36,13 @@ impl From<Manifest> for Config {
         Self {
             app: m.app,
             window: m.window,
+            windows: m.windows,
             runtime: m.runtime,
             dev: m.dev,
+            tray: m.tray,
+            menu: m.menu,
             in_memory_assets: None,
+            explicit_state_dir: None,
         }
     }
 }
@@ -51,6 +61,12 @@ impl Config {
         self.in_memory_assets
             .get_or_insert_with(HashMap::new)
             .insert(normalized, bytes.into());
+        self
+    }
+
+    /// Overrides the directory used for persisting window geometry (`window-state.json`).
+    pub fn with_state_dir(&mut self, dir: impl Into<PathBuf>) -> &mut Self {
+        self.explicit_state_dir = Some(dir.into());
         self
     }
 

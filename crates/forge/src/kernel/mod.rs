@@ -1,5 +1,6 @@
 mod assets;
 mod bootstrap;
+pub(crate) mod builtins;
 #[cfg(feature = "dev-tools")]
 mod devtools;
 pub(crate) mod http;
@@ -17,7 +18,9 @@ use tokio::task::AbortHandle;
 use crate::config::{Config, unpack_tar_gz_assets};
 use crate::error::{Error, Result};
 use crate::handler::{ErasedCommand, StateMap};
-use crate::runtime::{ProtocolRequest, ProtocolResponse, WindowHandle};
+#[cfg(feature = "dev-tools")]
+use crate::runtime::AppHandle;
+use crate::runtime::{ProtocolRequest, ProtocolResponse, WindowRegistry};
 
 include!(concat!(env!("OUT_DIR"), "/embedded_assets.rs"));
 
@@ -27,7 +30,7 @@ pub(crate) struct ForgeKernel {
     pub(crate) states: Arc<StateMap>,
     pub(crate) commands: HashMap<&'static str, Arc<dyn ErasedCommand>>,
     pub(crate) launch_token: String,
-    pub(crate) window_handle: WindowHandle,
+    pub(crate) registry: Arc<WindowRegistry>,
     #[allow(dead_code)]
     pub(crate) tokio_handle: tokio::runtime::Handle,
     #[cfg(feature = "dev-tools")]
@@ -42,7 +45,7 @@ impl ForgeKernel {
         mut config: Config,
         states: StateMap,
         commands: HashMap<&'static str, Arc<dyn ErasedCommand>>,
-        window_handle: WindowHandle,
+        registry: Arc<WindowRegistry>,
         tokio_handle: tokio::runtime::Handle,
     ) -> Result<Self> {
         let dev_watch_enabled = std::env::var("FORGE_DEV_WATCH").ok().as_deref() == Some("1");
@@ -112,8 +115,12 @@ impl ForgeKernel {
             && active_dev_url.is_none()
             && let Some(watch_root) = &canonical_assets_root
         {
-            devtools::start_live_reload_watcher(watch_root, window_handle.clone(), &tokio_handle)
-                .ok()
+            devtools::start_live_reload_watcher(
+                watch_root,
+                AppHandle::new(Arc::clone(&registry)),
+                &tokio_handle,
+            )
+            .ok()
         } else {
             None
         };
@@ -126,7 +133,7 @@ impl ForgeKernel {
             states: Arc::new(states),
             commands,
             launch_token,
-            window_handle,
+            registry,
             tokio_handle,
             #[cfg(feature = "dev-tools")]
             dev_proxy,
@@ -156,7 +163,7 @@ impl ForgeKernel {
         let raw_path = req.uri.path();
 
         if raw_path == "/__forge/bootstrap.js" {
-            return self.serve_bootstrap(&req.method);
+            return self.serve_bootstrap(&req.method, &req.window);
         }
 
         if let Some(encoded_cmd) = raw_path.strip_prefix("/__forge_ipc/") {

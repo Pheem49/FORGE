@@ -7,7 +7,7 @@ use crate::runtime::ProtocolResponse;
 const BOOTSTRAP_TEMPLATE: &str = include_str!("bootstrap.js");
 
 impl ForgeKernel {
-    pub(super) fn serve_bootstrap(&self, method: &Method) -> ProtocolResponse {
+    pub(super) fn serve_bootstrap(&self, method: &Method, window_label: &str) -> ProtocolResponse {
         if *method != Method::GET && *method != Method::HEAD {
             return plain_response(
                 StatusCode::METHOD_NOT_ALLOWED,
@@ -19,6 +19,7 @@ impl ForgeKernel {
         let token_js = serde_json::to_string(&self.launch_token).unwrap_or_else(|_| "\"\"".into());
         let runtime_js = serde_json::to_string(self.config.runtime.default.as_str())
             .unwrap_or_else(|_| "\"webview\"".into());
+        let window_js = serde_json::to_string(window_label).unwrap_or_else(|_| "\"main\"".into());
         let smoke_js = if std::env::var("FORGE_SMOKE_TEST").ok().as_deref() == Some("1") {
             "true"
         } else {
@@ -28,6 +29,7 @@ impl ForgeKernel {
         let script = BOOTSTRAP_TEMPLATE
             .replace("__FORGE_TOKEN__", &token_js)
             .replace("__FORGE_RUNTIME__", &runtime_js)
+            .replace("__FORGE_WINDOW__", &window_js)
             .replace("__FORGE_SMOKE__", smoke_js);
 
         let content_len = script.len();

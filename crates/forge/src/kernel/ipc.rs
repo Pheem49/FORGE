@@ -12,7 +12,7 @@ use super::assets::percent_decode;
 use super::http::{json_error_response, json_ok_response};
 use crate::error::{ForgeError, codes};
 use crate::handler::InvokeContext;
-use crate::runtime::{ProtocolRequest, ProtocolResponse};
+use crate::runtime::{AppHandle, ProtocolRequest, ProtocolResponse};
 
 impl ForgeKernel {
     pub(super) async fn handle_ipc(
@@ -62,9 +62,17 @@ impl ForgeKernel {
             );
         }
 
+        let calling_window = self
+            .registry
+            .window_handle(&req.window)
+            .or_else(|| self.registry.window_handle("main"));
+
         let cmd_name = percent_decode(encoded_cmd);
         if cmd_name == "__forge_drain_events" {
-            let events = self.window_handle.mark_js_ready_and_drain_early();
+            let events = calling_window
+                .as_ref()
+                .map(|w| w.mark_js_ready_and_drain_early())
+                .unwrap_or_default();
             return json_ok_response(&json!(events), csp);
         }
         if cmd_name == "__forge_ready" {
@@ -76,9 +84,20 @@ impl ForgeKernel {
                 "[FORGE_SMOKE_TEST] ready runtime={} ua={ua}",
                 self.config.runtime.default
             );
-            self.window_handle.quit_app();
+            self.registry.quit();
             return json_ok_response(&json!({ "ok": true }), csp);
         }
+
+        let Some(window) = calling_window else {
+            return json_error_response(
+                StatusCode::NOT_FOUND,
+                &ForgeError::not_found(
+                    codes::WINDOW_NOT_FOUND,
+                    format!("calling window '{}' is no longer open", req.window),
+                ),
+                csp,
+            );
+        };
 
         let Some(command) = self.commands.get(cmd_name.as_str()) else {
             return json_error_response(
@@ -112,7 +131,8 @@ impl ForgeKernel {
         let ctx = InvokeContext {
             states: Arc::clone(&self.states),
             config: Arc::clone(&self.config),
-            window: self.window_handle.clone(),
+            app_handle: AppHandle::new(Arc::clone(&self.registry)),
+            window,
         };
 
         let fut = command.call(ctx, payload);

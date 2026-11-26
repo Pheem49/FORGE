@@ -1,17 +1,18 @@
+use std::collections::HashMap;
 use std::os::raw::c_int;
 use std::ptr;
 use std::sync::{Arc, Mutex};
 
 use cef::{
-    App, Browser, BrowserSettings, Callback, CefString, CefStringMultimap, Client, CommandLine,
-    Frame, ImplApp, ImplBrowser, ImplBrowserHost, ImplCallback, ImplClient, ImplCommandLine,
-    ImplFrame, ImplLifeSpanHandler, ImplPostData, ImplPostDataElement, ImplRequest,
-    ImplResourceHandler, ImplResponse, ImplSchemeHandlerFactory, ImplSchemeRegistrar, ImplTask,
-    LifeSpanHandler, LogSeverity, PostDataElement, Rect, Request, ResourceHandler,
-    ResourceReadCallback, Response, RuntimeStyle, SchemeHandlerFactory, SchemeOptions,
-    SchemeRegistrar, Settings, Task, ThreadId, WindowInfo, WrapApp, WrapClient,
-    WrapLifeSpanHandler, WrapResourceHandler, WrapSchemeHandlerFactory, WrapTask, args::Args,
-    rc::Rc,
+    App, Browser, BrowserSettings, BrowserView, Callback, CefString, CefStringMultimap, Client,
+    CommandLine, Frame, ImplApp, ImplBrowser, ImplCallback, ImplClient, ImplCommandLine, ImplFrame,
+    ImplLifeSpanHandler, ImplPanel, ImplPanelDelegate, ImplPostData, ImplPostDataElement,
+    ImplRequest, ImplResourceHandler, ImplResponse, ImplSchemeHandlerFactory, ImplSchemeRegistrar,
+    ImplTask, ImplView, ImplViewDelegate, ImplWindow, ImplWindowDelegate, LifeSpanHandler,
+    LogSeverity, Point, PostDataElement, Rect, Request, ResourceHandler, ResourceReadCallback,
+    Response, SchemeHandlerFactory, SchemeOptions, SchemeRegistrar, Settings, Size, Task, ThreadId,
+    View, Window, WindowDelegate, WrapApp, WrapClient, WrapLifeSpanHandler, WrapResourceHandler,
+    WrapSchemeHandlerFactory, WrapTask, WrapWindowDelegate, args::Args, rc::Rc,
 };
 use http::header::{CONTENT_TYPE, HeaderName, HeaderValue};
 use http::{HeaderMap, Method, Uri};
@@ -21,8 +22,22 @@ use tokio::task::AbortHandle;
 use crate::error::{Error, Result};
 use crate::kernel::ForgeKernel;
 use crate::runtime::{
-    HostDirective, ProcessDisposition, ProtocolRequest, ProtocolResponse, RuntimeHost, emit_script,
+    HostCommand, HostEvent, ProcessDisposition, ProtocolRequest, ProtocolResponse, RuntimeHost,
+    WindowOp, WindowSpec, emit_script,
 };
+
+struct CefWindowEntry {
+    window: Window,
+    #[allow(dead_code)]
+    browser_view: BrowserView,
+    browser: Option<Browser>,
+}
+
+#[derive(Default)]
+struct CefHostState {
+    windows: HashMap<String, CefWindowEntry>,
+    browser_id_to_label: HashMap<c_int, String>,
+}
 
 pub(crate) struct CefHost;
 
@@ -42,7 +57,7 @@ impl RuntimeHost for CefHost {
 
     fn run_host(
         kernel: Arc<ForgeKernel>,
-        mut directives: mpsc::UnboundedReceiver<HostDirective>,
+        mut commands: mpsc::UnboundedReceiver<HostCommand>,
     ) -> Result<()> {
         init_cef_api_version()?;
 
@@ -73,7 +88,10 @@ impl RuntimeHost for CefHost {
             ));
         }
 
-        let mut scheme_factory = ForgeSchemeFactory::new(Arc::clone(&kernel));
+        let host_state = Arc::new(Mutex::new(CefHostState::default()));
+
+        let mut scheme_factory =
+            ForgeSchemeFactory::new(Arc::clone(&kernel), Arc::clone(&host_state));
         if cef::register_scheme_handler_factory(
             Some(&CefString::from("forge")),
             Some(&CefString::from("localhost")),
@@ -86,56 +104,91 @@ impl RuntimeHost for CefHost {
             ));
         }
 
-        let browser_slot: Arc<Mutex<Option<Browser>>> = Arc::new(Mutex::new(None));
-        let slot_for_directives = Arc::clone(&browser_slot);
-
+        let state_for_cmds = Arc::clone(&host_state);
+        let kernel_for_cmds = Arc::clone(&kernel);
         let forwarder = kernel.tokio_handle.spawn(async move {
-            while let Some(directive) = directives.recv().await {
-                let mut ui_task = DirectiveUiTask::new(Arc::clone(&slot_for_directives), directive);
+            while let Some(cmd) = commands.recv().await {
+                let mut ui_task = HostCommandUiTask::new(
+                    Arc::clone(&kernel_for_cmds),
+                    Arc::clone(&state_for_cmds),
+                    cmd,
+                );
                 cef::post_task(ThreadId::UI, Some(&mut ui_task));
             }
         });
 
-        let life_span = ForgeLifeSpanHandler::new(Arc::clone(&browser_slot));
-        let mut client = ForgeClient::new(life_span);
-
-        let win_cfg = &kernel.config.window;
-        let window_info = WindowInfo {
-            window_name: CefString::from(win_cfg.title.as_str()),
-            bounds: Rect {
-                x: 0,
-                y: 0,
-                width: win_cfg.width as c_int,
-                height: win_cfg.height as c_int,
-            },
-            runtime_style: RuntimeStyle::ALLOY,
-            ..Default::default()
-        };
-        let browser_settings = BrowserSettings::default();
-        let entry_url = CefString::from("forge://localhost/index.html");
-
-        if cef::browser_host_create_browser(
-            Some(&window_info),
-            Some(&mut client),
-            Some(&entry_url),
-            Some(&browser_settings),
-            None,
-            None,
-        ) == 0
-        {
-            forwarder.abort();
-            cef::shutdown();
-            return Err(Error::Runtime(
-                "failed to create Chromium browser window".into(),
-            ));
+        for (label, spec) in kernel.registry.startup_windows() {
+            create_views_window(&kernel, &host_state, &label, &spec)?;
         }
 
         cef::run_message_loop();
 
+        if let Ok(mut guard) = host_state.lock() {
+            guard.windows.clear();
+            guard.browser_id_to_label.clear();
+        }
         forwarder.abort();
         cef::shutdown();
         Ok(())
     }
+}
+
+fn create_views_window(
+    kernel: &Arc<ForgeKernel>,
+    host_state: &Arc<Mutex<CefHostState>>,
+    label: &str,
+    spec: &WindowSpec,
+) -> Result<()> {
+    let life_span = ForgeLifeSpanHandler::new(label.to_string(), Arc::clone(host_state));
+    let mut client = ForgeClient::new(life_span);
+    let browser_settings = BrowserSettings::default();
+    let clean_path = spec.url.trim_start_matches('/');
+    let rel = if clean_path.is_empty() {
+        "index.html"
+    } else {
+        clean_path
+    };
+    let entry_url = CefString::from(format!("forge://localhost/{rel}").as_str());
+
+    let browser_view = cef::browser_view_create(
+        Some(&mut client),
+        Some(&entry_url),
+        Some(&browser_settings),
+        None,
+        None,
+        None,
+    )
+    .ok_or_else(|| {
+        Error::Runtime(format!(
+            "failed to create CEF BrowserView for window '{label}'"
+        ))
+    })?;
+
+    let mut win_delegate = ForgeWindowDelegate::new(
+        label.to_string(),
+        spec.clone(),
+        browser_view.clone(),
+        Arc::clone(kernel),
+        Arc::clone(host_state),
+    );
+    let window = cef::window_create_top_level(Some(&mut win_delegate)).ok_or_else(|| {
+        Error::Runtime(format!(
+            "failed to create top-level CEF Views Window for '{label}'"
+        ))
+    })?;
+
+    if let Ok(mut guard) = host_state.lock() {
+        guard.windows.insert(
+            label.to_string(),
+            CefWindowEntry {
+                window,
+                browser_view,
+                browser: None,
+            },
+        );
+    }
+
+    Ok(())
 }
 
 fn init_cef_api_version() -> Result<()> {
@@ -208,25 +261,148 @@ cef::wrap_app! {
     }
 }
 
+cef::wrap_window_delegate! {
+    struct ForgeWindowDelegate {
+        label: String,
+        spec: WindowSpec,
+        browser_view: BrowserView,
+        kernel: Arc<ForgeKernel>,
+        host_state: Arc<Mutex<CefHostState>>,
+    }
+
+    impl ViewDelegate {
+        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
+            Size {
+                width: self.spec.width as c_int,
+                height: self.spec.height as c_int,
+            }
+        }
+
+        fn minimum_size(&self, _view: Option<&mut View>) -> Size {
+            Size {
+                width: self.spec.min_width.unwrap_or(200) as c_int,
+                height: self.spec.min_height.unwrap_or(150) as c_int,
+            }
+        }
+    }
+
+    impl PanelDelegate {}
+
+    impl WindowDelegate {
+        fn on_window_created(&self, window: Option<&mut Window>) {
+            let Some(win) = window else {
+                return;
+            };
+            let mut child = View::from(&self.browser_view);
+            win.add_child_view(Some(&mut child));
+            win.set_title(Some(&CefString::from(self.spec.title.as_str())));
+
+            let size = Size {
+                width: self.spec.width as c_int,
+                height: self.spec.height as c_int,
+            };
+            win.set_size(Some(&size));
+            if let (Some(x), Some(y)) = (self.spec.x, self.spec.y) {
+                let pos = Point { x, y };
+                win.set_position(Some(&pos));
+            } else {
+                win.center_window(Some(&size));
+            }
+
+            if self.spec.visible {
+                win.show();
+            }
+            if self.spec.maximized {
+                win.maximize();
+            }
+        }
+
+        fn on_window_bounds_changed(&self, _window: Option<&mut Window>, new_bounds: Option<&Rect>) {
+            if let Some(b) = new_bounds {
+                if b.width > 0 && b.height > 0 {
+                    let _ = self.kernel.registry.handle_host_event(HostEvent::Resized {
+                        label: self.label.clone(),
+                        width: b.width as u32,
+                        height: b.height as u32,
+                    });
+                }
+                let _ = self.kernel.registry.handle_host_event(HostEvent::Moved {
+                    label: self.label.clone(),
+                    x: b.x,
+                    y: b.y,
+                });
+            }
+        }
+
+        fn on_window_activation_changed(&self, _window: Option<&mut Window>, active: c_int) {
+            let _ = self.kernel.registry.handle_host_event(HostEvent::Focused {
+                label: self.label.clone(),
+                focused: active != 0,
+            });
+        }
+
+        fn on_window_destroyed(&self, _window: Option<&mut Window>) {
+            if let Ok(mut guard) = self.host_state.lock()
+                && let Some(removed) = guard.windows.remove(&self.label)
+                && let Some(b) = removed.browser
+            {
+                guard.browser_id_to_label.remove(&b.identifier());
+            }
+            let should_exit = self.kernel.registry.handle_host_event(HostEvent::Closed {
+                label: self.label.clone(),
+            });
+            if should_exit {
+                cef::quit_message_loop();
+            }
+        }
+
+        fn is_frameless(&self, _window: Option<&mut Window>) -> c_int {
+            c_int::from(!self.spec.decorations)
+        }
+
+        fn can_resize(&self, _window: Option<&mut Window>) -> c_int {
+            c_int::from(self.spec.resizable)
+        }
+
+        fn can_maximize(&self, _window: Option<&mut Window>) -> c_int {
+            c_int::from(self.spec.resizable)
+        }
+
+        fn can_minimize(&self, _window: Option<&mut Window>) -> c_int {
+            1
+        }
+
+        fn can_close(&self, _window: Option<&mut Window>) -> c_int {
+            1
+        }
+    }
+}
+
 cef::wrap_life_span_handler! {
     struct ForgeLifeSpanHandler {
-        browser_slot: Arc<Mutex<Option<Browser>>>,
+        label: String,
+        host_state: Arc<Mutex<CefHostState>>,
     }
 
     impl LifeSpanHandler {
         fn on_after_created(&self, browser: Option<&mut Browser>) {
             if let Some(b) = browser
-                && let Ok(mut guard) = self.browser_slot.lock()
+                && let Ok(mut guard) = self.host_state.lock()
             {
-                *guard = Some(b.clone());
+                let bid = b.identifier();
+                guard.browser_id_to_label.insert(bid, self.label.clone());
+                if let Some(entry) = guard.windows.get_mut(&self.label) {
+                    entry.browser = Some(b.clone());
+                }
             }
         }
 
-        fn on_before_close(&self, _browser: Option<&mut Browser>) {
-            if let Ok(mut guard) = self.browser_slot.lock() {
-                *guard = None;
+        fn on_before_close(&self, browser: Option<&mut Browser>) {
+            if let Some(b) = browser
+                && let Ok(mut guard) = self.host_state.lock()
+            {
+                guard.browser_id_to_label.remove(&b.identifier());
             }
-            cef::quit_message_loop();
         }
     }
 }
@@ -244,57 +420,106 @@ cef::wrap_client! {
 }
 
 cef::wrap_task! {
-    struct DirectiveUiTask {
-        browser_slot: Arc<Mutex<Option<Browser>>>,
-        directive: HostDirective,
+    struct HostCommandUiTask {
+        kernel: Arc<ForgeKernel>,
+        host_state: Arc<Mutex<CefHostState>>,
+        command: HostCommand,
     }
 
     impl Task {
         fn execute(&self) {
-            let browser = self.browser_slot.lock().ok().and_then(|g| g.clone());
-            match &self.directive {
-                HostDirective::SetTitle(new_title) => {
-                    if let Some(b) = browser
-                        && let Some(frame) = b.main_frame()
-                        && let Ok(escaped) = serde_json::to_string(new_title)
-                    {
-                        let script = CefString::from(format!("document.title = {escaped};").as_str());
-                        frame.execute_java_script(Some(&script), None, 0);
+            match &self.command {
+                HostCommand::CreateWindow { label, spec } => {
+                    let exists = self
+                        .host_state
+                        .lock()
+                        .map(|g| g.windows.contains_key(label))
+                        .unwrap_or(false);
+                    if !exists {
+                        let _ = create_views_window(&self.kernel, &self.host_state, label, spec);
                     }
                 }
-                HostDirective::SetSize { width, height } => {
-                    if let Some(b) = browser
-                        && let Some(frame) = b.main_frame()
-                    {
-                        let script = CefString::from(
-                            format!("window.resizeTo({width}, {height});").as_str(),
-                        );
-                        frame.execute_java_script(Some(&script), None, 0);
+                HostCommand::Window { label, op } => {
+                    let entry_pair = self.host_state.lock().ok().and_then(|g| {
+                        g.windows
+                            .get(label)
+                            .map(|e| (e.window.clone(), e.browser.clone()))
+                    });
+                    let Some((window, browser)) = entry_pair else {
+                        return;
+                    };
+                    match op {
+                        WindowOp::SetTitle(title) => {
+                            window.set_title(Some(&CefString::from(title.as_str())));
+                        }
+                        WindowOp::SetSize { width, height } => {
+                            let sz = Size {
+                                width: *width as c_int,
+                                height: *height as c_int,
+                            };
+                            window.set_size(Some(&sz));
+                        }
+                        WindowOp::SetPosition { x, y } => {
+                            let pt = Point { x: *x, y: *y };
+                            window.set_position(Some(&pt));
+                        }
+                        WindowOp::Minimize(minimized) => {
+                            if *minimized {
+                                window.minimize();
+                            } else {
+                                window.restore();
+                            }
+                        }
+                        WindowOp::Maximize(maximized) => {
+                            if *maximized {
+                                window.maximize();
+                            } else {
+                                window.restore();
+                            }
+                        }
+                        WindowOp::Fullscreen(fullscreen) => {
+                            window.set_fullscreen(c_int::from(*fullscreen));
+                        }
+                        WindowOp::Show => {
+                            window.show();
+                        }
+                        WindowOp::Hide => {
+                            window.hide();
+                        }
+                        WindowOp::Focus => {
+                            window.activate();
+                        }
+                        WindowOp::Drag => {}
+                        WindowOp::Emit {
+                            event,
+                            payload_json,
+                        } => {
+                            if let Some(b) = browser
+                                && let Some(frame) = b.main_frame()
+                                && let Some(raw_script) = emit_script(event, payload_json)
+                            {
+                                let script = CefString::from(raw_script.as_str());
+                                frame.execute_java_script(Some(&script), None, 0);
+                            }
+                        }
+                        WindowOp::Close => {
+                            window.close();
+                        }
                     }
                 }
-                HostDirective::SetMinimized(_)
-                | HostDirective::SetMaximized(_)
-                | HostDirective::SetFullscreen(_)
-                | HostDirective::DragWindow => {}
-                HostDirective::EmitEvent {
-                    event,
-                    payload_json,
-                } => {
-                    if let Some(b) = browser
-                        && let Some(frame) = b.main_frame()
-                        && let Some(raw_script) = emit_script(event, payload_json)
-                    {
-                        let script = CefString::from(raw_script.as_str());
-                        frame.execute_java_script(Some(&script), None, 0);
-                    }
-                }
-                HostDirective::CloseWindow | HostDirective::QuitApp => {
-                    if let Some(b) = browser
-                        && let Some(host) = b.host()
-                    {
-                        host.close_browser(1);
-                    } else {
+                HostCommand::SetTray(_) | HostCommand::SetMenu(_) => {}
+                HostCommand::Quit => {
+                    let windows: Vec<Window> = self
+                        .host_state
+                        .lock()
+                        .map(|g| g.windows.values().map(|e| e.window.clone()).collect())
+                        .unwrap_or_default();
+                    if windows.is_empty() {
                         cef::quit_message_loop();
+                    } else {
+                        for win in windows {
+                            win.close();
+                        }
                     }
                 }
             }
@@ -305,18 +530,31 @@ cef::wrap_task! {
 cef::wrap_scheme_handler_factory! {
     struct ForgeSchemeFactory {
         kernel: Arc<ForgeKernel>,
+        host_state: Arc<Mutex<CefHostState>>,
     }
 
     impl SchemeHandlerFactory {
         fn create(
             &self,
-            _browser: Option<&mut Browser>,
+            browser: Option<&mut Browser>,
             _frame: Option<&mut Frame>,
             _scheme_name: Option<&CefString>,
             _request: Option<&mut Request>,
         ) -> Option<ResourceHandler> {
+            let window_label = browser
+                .as_ref()
+                .map(|b| b.identifier())
+                .and_then(|bid| {
+                    self.host_state
+                        .lock()
+                        .ok()
+                        .and_then(|g| g.browser_id_to_label.get(&bid).cloned())
+                })
+                .unwrap_or_else(|| "main".to_string());
+
             Some(ForgeResourceHandler::new(
                 Arc::clone(&self.kernel),
+                window_label,
                 Arc::new(Mutex::new(ResourceState::default())),
             ))
         }
@@ -333,6 +571,7 @@ struct ResourceState {
 cef::wrap_resource_handler! {
     struct ForgeResourceHandler {
         kernel: Arc<ForgeKernel>,
+        window_label: String,
         state: Arc<Mutex<ResourceState>>,
     }
 
@@ -353,8 +592,7 @@ cef::wrap_resource_handler! {
                 return 0;
             };
 
-            let proto_req = extract_protocol_request(req);
-            // Defer response completion onto FORGE's async Tokio pool.
+            let proto_req = extract_protocol_request(req, self.window_label.clone());
             *handle_request = 0;
             let cb = callback.clone();
             let state_slot = Arc::clone(&self.state);
@@ -399,7 +637,6 @@ cef::wrap_resource_handler! {
                 response.set_status_text(Some(&CefString::from(reason)));
             }
 
-            // CEF's `set_mime_type` expects bare type/subtype without `; charset=utf-8`.
             let full_ct = proto_res
                 .headers
                 .get(CONTENT_TYPE)
@@ -470,7 +707,7 @@ cef::wrap_resource_handler! {
     }
 }
 
-fn extract_protocol_request(req: &mut Request) -> ProtocolRequest {
+fn extract_protocol_request(req: &mut Request, window_label: String) -> ProtocolRequest {
     let raw_url = CefString::from(&req.url()).to_string();
     let uri: Uri = raw_url
         .parse()
@@ -512,6 +749,7 @@ fn extract_protocol_request(req: &mut Request) -> ProtocolRequest {
     }
 
     ProtocolRequest {
+        window: window_label,
         method,
         uri,
         headers,

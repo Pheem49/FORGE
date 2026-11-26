@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -39,6 +40,14 @@ impl fmt::Display for RuntimeKind {
     }
 }
 
+fn default_true() -> bool {
+    true
+}
+
+fn default_entry_url() -> String {
+    "/index.html".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppMetaConfig {
@@ -48,6 +57,9 @@ pub struct AppMetaConfig {
     pub identifier: String,
     pub assets: PathBuf,
     pub icon: Option<PathBuf>,
+    pub single_instance: bool,
+    #[serde(default = "default_true")]
+    pub exit_on_last_window_close: bool,
 }
 
 impl Default for AppMetaConfig {
@@ -59,6 +71,8 @@ impl Default for AppMetaConfig {
             identifier: "dev.forge.app".to_string(),
             assets: PathBuf::from("ui"),
             icon: None,
+            single_instance: false,
+            exit_on_last_window_close: true,
         }
     }
 }
@@ -66,27 +80,45 @@ impl Default for AppMetaConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WindowConfig {
+    #[serde(default = "default_entry_url")]
+    pub url: String,
     pub title: String,
     pub width: u32,
     pub height: u32,
     pub min_width: Option<u32>,
     pub min_height: Option<u32>,
+    pub x: Option<i32>,
+    pub y: Option<i32>,
+    #[serde(default = "default_true")]
     pub resizable: bool,
+    #[serde(default = "default_true")]
     pub decorations: bool,
+    #[serde(default = "default_true")]
+    pub visible: bool,
+    #[serde(default = "default_true")]
     pub devtools: bool,
+    pub remember_state: bool,
+    #[serde(default = "default_true")]
+    pub create_on_startup: bool,
 }
 
 impl Default for WindowConfig {
     fn default() -> Self {
         Self {
+            url: default_entry_url(),
             title: "FORGE App".to_string(),
             width: 1024,
             height: 768,
             min_width: None,
             min_height: None,
+            x: None,
+            y: None,
             resizable: true,
             decorations: true,
+            visible: true,
             devtools: true,
+            remember_state: false,
+            create_on_startup: true,
         }
     }
 }
@@ -106,14 +138,89 @@ pub struct DevConfig {
     pub before_build_command: Option<String>,
 }
 
+/// Declarative menu item inside `[tray].menu` or `[[menu.submenu]].items`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MenuItemConfig {
+    pub id: Option<String>,
+    pub label: Option<String>,
+    pub accelerator: Option<String>,
+    pub separator: bool,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+impl Default for MenuItemConfig {
+    fn default() -> Self {
+        Self {
+            id: None,
+            label: None,
+            accelerator: None,
+            separator: false,
+            enabled: true,
+        }
+    }
+}
+
+impl MenuItemConfig {
+    pub fn item(id: impl Into<String>, label: impl Into<String>) -> Self {
+        Self {
+            id: Some(id.into()),
+            label: Some(label.into()),
+            accelerator: None,
+            separator: false,
+            enabled: true,
+        }
+    }
+
+    pub fn separator() -> Self {
+        Self {
+            separator: true,
+            ..Self::default()
+        }
+    }
+
+    pub fn with_accelerator(mut self, accel: impl Into<String>) -> Self {
+        self.accelerator = Some(accel.into());
+        self
+    }
+}
+
+/// Declarative system tray configuration (`[tray]` in `forge.toml`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TrayConfig {
+    pub icon: Option<PathBuf>,
+    pub tooltip: Option<String>,
+    pub menu: Vec<MenuItemConfig>,
+}
+
+/// Top-level application submenu (`[[menu.submenu]]` in `forge.toml`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SubmenuConfig {
+    pub label: String,
+    pub items: Vec<MenuItemConfig>,
+}
+
+/// Declarative application menu bar (`[menu]` in `forge.toml`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MenuConfig {
+    pub submenu: Vec<SubmenuConfig>,
+}
+
 /// Shared declarative `forge.toml` schema consumed by both the FORGE runtime and `forge-cli`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Manifest {
     pub app: AppMetaConfig,
     pub window: WindowConfig,
+    pub windows: BTreeMap<String, WindowConfig>,
     pub runtime: RuntimeConfig,
     pub dev: DevConfig,
+    pub tray: Option<TrayConfig>,
+    pub menu: Option<MenuConfig>,
 }
 
 impl Manifest {

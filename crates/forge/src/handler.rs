@@ -11,7 +11,7 @@ use serde_json::Value;
 
 use crate::config::{AppConfig, Config};
 use crate::error::ForgeError;
-use crate::runtime::WindowHandle;
+use crate::runtime::{AppHandle, WindowHandle};
 
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -42,6 +42,7 @@ impl StateMap {
 pub struct InvokeContext {
     pub(crate) states: Arc<StateMap>,
     pub(crate) config: Arc<Config>,
+    pub(crate) app_handle: AppHandle,
     pub(crate) window: WindowHandle,
 }
 
@@ -108,6 +109,14 @@ impl sealed::Sealed for WindowHandle {}
 impl FromContext for WindowHandle {
     fn from_context(ctx: &InvokeContext) -> Result<Self, ForgeError> {
         Ok(ctx.window.clone())
+    }
+}
+
+impl sealed::Sealed for AppHandle {}
+
+impl FromContext for AppHandle {
+    fn from_context(ctx: &InvokeContext) -> Result<Self, ForgeError> {
+        Ok(ctx.app_handle.clone())
     }
 }
 

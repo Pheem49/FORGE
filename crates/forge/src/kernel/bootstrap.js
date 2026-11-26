@@ -2,6 +2,7 @@
   "use strict";
   const TOKEN = __FORGE_TOKEN__;
   const RUNTIME = __FORGE_RUNTIME__;
+  const WINDOW_LABEL = __FORGE_WINDOW__;
   const SMOKE = __FORGE_SMOKE__;
   const listeners = new Map();
 
@@ -83,6 +84,34 @@
     return data;
   }
 
+  function emit(event, payload) {
+    return invoke("event.emit_all", { event, payload: payload === undefined ? null : payload });
+  }
+
+  function emitTo(target, event, payload) {
+    return invoke("event.emit_to", {
+      target,
+      event,
+      payload: payload === undefined ? null : payload
+    });
+  }
+
+  const windowApi = Object.freeze({
+    label: WINDOW_LABEL,
+    close: () => invoke("window.close"),
+    minimize: (minimized = true) => invoke("window.minimize", { minimized }),
+    maximize: (maximized) => invoke("window.maximize", maximized === undefined ? null : { maximized }),
+    toggleFullscreen: (fullscreen) =>
+      invoke("window.toggle_fullscreen", fullscreen === undefined ? null : { fullscreen }),
+    setTitle: (title) => invoke("window.set_title", { title }),
+    show: () => invoke("window.show"),
+    hide: () => invoke("window.hide"),
+    focus: () => invoke("window.focus"),
+    startDragging: () => invoke("window.start_dragging"),
+    create: (opts) => invoke("window.create", opts),
+    list: () => invoke("window.list")
+  });
+
   Object.defineProperty(window, "__forge_dispatch", {
     value: dispatch,
     writable: false,
@@ -91,7 +120,15 @@
   });
 
   Object.defineProperty(window, "forge", {
-    value: Object.freeze({ runtime: RUNTIME, invoke, listen, once }),
+    value: Object.freeze({
+      runtime: RUNTIME,
+      window: windowApi,
+      invoke,
+      listen,
+      once,
+      emit,
+      emitTo
+    }),
     writable: false,
     configurable: false,
     enumerable: true

@@ -11,9 +11,10 @@ path = "src/lib.rs"
 
 [features]
 default = ["webview", "dev-tools"]
-webview = ["dep:tao", "dep:wry"]
+webview = ["dep:tao", "dep:wry", "dep:dirs"]
 cef = ["dep:cef", "dep:dirs"]
 dev-tools = ["dep:notify", "dep:ureq"]
+desktop-ui = ["dep:tray-icon", "dep:muda", "dep:image"]
 plugin-dialog = ["dep:rfd"]
 plugin-clipboard = ["dep:arboard"]
 plugin-notification = ["dep:notify-rust"]
@@ -29,9 +30,12 @@ plugins = [
 arboard = { workspace = true, optional = true }
 cef = { workspace = true, optional = true }
 dirs = { workspace = true, optional = true }
+fd-lock.workspace = true
 flate2.workspace = true
 getrandom.workspace = true
 http.workspace = true
+image = { workspace = true, optional = true }
+muda = { workspace = true, optional = true }
 notify = { workspace = true, optional = true }
 notify-rust = { workspace = true, optional = true }
 rfd = { workspace = true, optional = true }
@@ -41,6 +45,7 @@ tao = { workspace = true, optional = true }
 tar.workspace = true
 tokio.workspace = true
 toml.workspace = true
+tray-icon = { workspace = true, optional = true }
 ureq = { workspace = true, optional = true }
 wry = { workspace = true, optional = true }
 

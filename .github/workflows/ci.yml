@@ -39,8 +39,8 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Run Headless & CLI E2E Tests
         run: cargo test --workspace
-      - name: Type-check all feature combinations (WebView + CEF + Plugins)
-        run: cargo check -p forge-app --features webview,cef,cef/dox,plugins,dev-tools
+      - name: Type-check all feature combinations (WebView + CEF + Plugins + Desktop UI)
+        run: cargo check -p forge-app --features webview,cef,cef/dox,plugins,dev-tools,desktop-ui
 
   smoke-linux:
     name: Live Window Smoke Test (Linux Xvfb)
