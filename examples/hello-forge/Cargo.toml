@@ -1,0 +1,18 @@
+[package]
+name = "hello-forge"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[features]
+default = ["webview"]
+webview = ["forge/webview"]
+cef = ["forge/cef"]
+
+[dependencies]
+forge = { path = "../../crates/forge", default-features = false }
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

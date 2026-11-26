@@ -1,0 +1,14 @@
+[package]
+name = "{{CRATE_NAME}}"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = ["webview"]
+webview = ["forge/webview"]
+cef = ["forge/cef"]
+
+[dependencies]
+forge = {{FORGE_DEP_SPEC}}
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

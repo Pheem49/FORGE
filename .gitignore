@@ -1,0 +1,15 @@
+# Rust build artifacts
+/target
+**/target/
+**/*.rs.bk
+
+# Local environment & editor files
+.DS_Store
+*.swp
+*~
+.env
+.env.*
+
+# Local AI agent skill caches
+/.agents/
+/skills-lock.json

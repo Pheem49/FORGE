@@ -1,0 +1,16 @@
+[app]
+name = "hello-forge"
+identifier = "dev.forge.hello"
+assets = "ui"
+
+[window]
+title = "FORGE Workbench"
+width = 980
+height = 660
+min_width = 680
+min_height = 480
+resizable = true
+devtools = true
+
+[runtime]
+default = "webview"

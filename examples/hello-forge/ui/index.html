@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FORGE Workbench</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="workbench">
+      <header class="masthead">
+        <div class="masthead-title">
+          <h1>FORGE Workbench</h1>
+          <p class="subtitle">
+            One Rust codebase and HTML interface running across System WebView and Chromium.
+          </p>
+        </div>
+        <div class="runtime-badge" id="runtime-badge" aria-live="polite">
+          <span class="status-dot"></span>
+          <span id="runtime-label">Connecting to Rust host...</span>
+        </div>
+      </header>
+
+      <div class="columns">
+        <section class="panel" aria-labelledby="ipc-heading">
+          <h2 id="ipc-heading">Rust command invocations</h2>
+
+          <form id="greet-form" class="control-group" novalidate>
+            <label for="name-input">Developer name</label>
+            <div class="input-row">
+              <input
+                id="name-input"
+                name="name"
+                type="text"
+                placeholder="Pheem"
+                autocomplete="off"
+              />
+              <button type="submit" class="btn-primary">Send greeting</button>
+            </div>
+            <p id="greet-feedback" class="feedback" role="status" aria-live="polite"></p>
+          </form>
+
+          <div class="divider"></div>
+
+          <div class="control-group">
+            <div class="counter-header">
+              <div>
+                <h3>Shared state counter</h3>
+                <p class="hint">Stored in Rust <code>State&lt;WorkbenchState&gt;</code> and synced to the OS window title.</p>
+              </div>
+              <output id="counter-value" class="counter-readout">0</output>
+            </div>
+            <div class="button-row">
+              <button type="button" id="inc-one-btn" class="btn-secondary">Add 1</button>
+              <button type="button" id="inc-five-btn" class="btn-secondary">Add 5</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel" aria-labelledby="telemetry-heading">
+          <h2 id="telemetry-heading">Engine inspection</h2>
+
+          <dl class="spec-grid">
+            <div class="spec-row">
+              <dt>Active runtime</dt>
+              <dd id="spec-runtime">-</dd>
+            </div>
+            <div class="spec-row">
+              <dt>Host process</dt>
+              <dd id="spec-process">-</dd>
+            </div>
+            <div class="spec-row">
+              <dt>Browser engine</dt>
+              <dd id="spec-ua" class="mono-wrap">-</dd>
+            </div>
+          </dl>
+
+          <div class="log-header">
+            <h3>Recent IPC calls</h3>
+            <button type="button" id="clear-log-btn" class="btn-ghost">Clear log</button>
+          </div>
+          <ol id="ipc-log" class="ipc-log" aria-live="polite">
+            <li class="log-empty">Invoke a command to inspect round-trip timing.</li>
+          </ol>
+        </section>
+      </div>
+    </main>
+    <script src="/main.js"></script>
+  </body>
+</html>

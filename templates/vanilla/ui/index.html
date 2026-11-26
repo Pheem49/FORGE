@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{APP_TITLE}}</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="header">
+        <h1>{{APP_TITLE}}</h1>
+        <span id="runtime-pill" class="runtime-pill">Checking runtime...</span>
+      </header>
+
+      <p class="lead">
+        Edit <code>ui/index.html</code> for interface changes or <code>src/main.rs</code> to add Rust commands.
+      </p>
+
+      <form id="greet-form" class="card" novalidate>
+        <label for="name-input">Your name</label>
+        <div class="row">
+          <input id="name-input" type="text" placeholder="Ada Lovelace" autocomplete="off" />
+          <button type="submit">Greet from Rust</button>
+        </div>
+        <p id="reply" class="reply" role="status" aria-live="polite"></p>
+      </form>
+    </main>
+    <script src="/main.js"></script>
+  </body>
+</html>
