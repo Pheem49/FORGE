@@ -243,6 +243,29 @@ button {
 
 .button-row {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.close-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background-color: rgba(245, 158, 11, 0.14);
+  border: 1px solid var(--molten-amber);
+  color: var(--chalk-ivory);
+}
+
+.close-banner[hidden] {
+  display: none;
+}
+
+.close-banner-actions {
+  display: flex;
   gap: 8px;
 }
 

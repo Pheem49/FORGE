@@ -15,11 +15,13 @@
   const maxBtn = document.getElementById("max-btn");
   const restoreBtn = document.getElementById("restore-btn");
   const pinBtn = document.getElementById("pin-btn");
+  const guardCloseBtn = document.getElementById("guard-close-btn");
   const binEchoBtn = document.getElementById("bin-echo-btn");
   const closeBanner = document.getElementById("close-confirm-banner");
   const confirmDestroyBtn = document.getElementById("confirm-destroy-btn");
   const cancelCloseBtn = document.getElementById("cancel-close-btn");
   let pinnedTop = false;
+  let guardClose = false;
   const noteInput = document.getElementById("note-input");
   const saveNoteBtn = document.getElementById("save-note-btn");
   const copyNoteBtn = document.getElementById("copy-note-btn");
@@ -127,6 +129,16 @@
     pinnedTop = !pinnedTop;
     await window.forge.window.setAlwaysOnTop(pinnedTop);
     recordLog("[window] always_on_top:", String(pinnedTop), false);
+  });
+  guardCloseBtn.addEventListener("click", async () => {
+    guardClose = !guardClose;
+    const mode = guardClose ? "emit" : "close";
+    await window.forge.window.setOnClose(mode);
+    guardCloseBtn.textContent = `Guard Close: ${guardClose ? "On" : "Off"}`;
+    if (!guardClose) {
+      closeBanner.hidden = true;
+    }
+    recordLog("[window] on_close:", mode, false);
   });
   binEchoBtn.addEventListener("click", async () => {
     const sample = new Uint8Array([0x01, 0x02, 0x03, 0xff]);

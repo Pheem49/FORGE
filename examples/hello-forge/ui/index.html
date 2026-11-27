@@ -61,12 +61,15 @@
               <button type="button" id="max-btn" class="btn-secondary">Maximize</button>
               <button type="button" id="restore-btn" class="btn-secondary">Restore</button>
               <button type="button" id="pin-btn" class="btn-secondary">Toggle Pin</button>
+              <button type="button" id="guard-close-btn" class="btn-secondary">Guard Close: Off</button>
               <button type="button" id="bin-echo-btn" class="btn-secondary">Binary Reverse</button>
             </div>
-            <div id="close-confirm-banner" class="feedback" hidden>
-              <span>Close requested — exit workbench now?</span>
-              <button type="button" id="confirm-destroy-btn" class="btn-primary">Exit</button>
-              <button type="button" id="cancel-close-btn" class="btn-ghost">Stay</button>
+            <div id="close-confirm-banner" class="close-banner" hidden>
+              <span>Unsaved guard active — exit workbench now?</span>
+              <div class="close-banner-actions">
+                <button type="button" id="confirm-destroy-btn" class="btn-primary">Exit now</button>
+                <button type="button" id="cancel-close-btn" class="btn-secondary">Stay</button>
+              </div>
             </div>
           </div>
 

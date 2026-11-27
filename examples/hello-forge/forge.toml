@@ -14,7 +14,6 @@ min_width = 700
 min_height = 500
 resizable = true
 decorations = true
-on_close = "emit"
 devtools = true
 
 [runtime]
