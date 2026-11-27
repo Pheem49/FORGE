@@ -222,7 +222,10 @@ fn resolve_forge_dep_spec(explicit_path: Option<&Path>) -> String {
         }
     }
 
-    r#"{ package = "forge-app", version = "0.3.0", default-features = false }"#.to_string()
+    format!(
+        r#"{{ package = "forge-app", version = "{}", default-features = false }}"#,
+        env!("CARGO_PKG_VERSION")
+    )
 }
 
 fn sanitize_crate_name(raw: &str) -> Result<String> {

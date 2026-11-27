@@ -88,8 +88,21 @@ impl BundleTarget for DebTarget {
             png_icons_dir.join(format!("{icon_id}.png")),
         );
 
+        let (exec_suffix, mime_line) = if app.manifest.app.schemes.is_empty() {
+            ("", String::new())
+        } else {
+            let handlers: String = app
+                .manifest
+                .app
+                .schemes
+                .iter()
+                .map(|s| format!("x-scheme-handler/{s};"))
+                .collect();
+            (" %u", format!("MimeType={handlers}\n"))
+        };
+
         let desktop_entry = format!(
-            "[Desktop Entry]\nType=Application\nName={}\nComment={}\nExec=/usr/bin/{}\nIcon={}\nTerminal=false\nCategories={};\n",
+            "[Desktop Entry]\nType=Application\nName={}\nComment={}\nExec=/usr/bin/{}{exec_suffix}\nIcon={}\nTerminal=false\nCategories={};\n{mime_line}",
             app.manifest.window.title,
             app.description(),
             app.bin_name,

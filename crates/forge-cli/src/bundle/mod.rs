@@ -1,6 +1,7 @@
 pub mod icons;
 pub mod linux;
 pub mod macos;
+pub mod sign;
 pub mod staged;
 pub mod target;
 pub mod windows;
@@ -17,6 +18,11 @@ use tar::Builder;
 use self::icons::IconSet;
 use self::linux::{appimage::AppImageTarget, deb::DebTarget, tarball::TarballTarget};
 use self::macos::{app::MacAppTarget, dmg::DmgTarget};
+pub use self::sign::SigningOptions;
+use self::sign::{
+    maybe_write_signed_update_manifest, sign_and_notarize_macos_dmg, sign_macos_app_bundle,
+    sign_windows_executable,
+};
 use self::staged::{StagedApp, copy_dir_all, create_dir_all, set_executable};
 use self::target::BundleTarget;
 use self::windows::{nsis::NsisTarget, zip::ZipTarget};
@@ -48,11 +54,27 @@ pub struct BuildArtifacts {
     pub macos_app_path: Option<PathBuf>,
     pub dmg_path: Option<PathBuf>,
     pub checksums_path: Option<PathBuf>,
+    pub latest_json_path: Option<PathBuf>,
 }
 
 /// Compiles a release binary with single-file embedded UI assets, generates multi-OS icons,
 /// runs requested [`BundleTarget`] adapters, and writes `SHA256SUMS` into `dist/`.
 pub fn run_build<P, R>(opts: &BuildOptions, provisioner: &P, runner: &R) -> Result<BuildArtifacts>
+where
+    P: CefProvisioner,
+    R: ProcessRunner,
+{
+    run_build_signed(opts, &SigningOptions::from_env(), provisioner, runner)
+}
+
+/// Compiles, packages, code-signs (when configured), and optionally emits a signed `dist/latest.json`
+/// release manifest using explicit [`SigningOptions`].
+pub fn run_build_signed<P, R>(
+    opts: &BuildOptions,
+    signing: &SigningOptions,
+    provisioner: &P,
+    runner: &R,
+) -> Result<BuildArtifacts>
 where
     P: CefProvisioner,
     R: ProcessRunner,
@@ -206,6 +228,11 @@ where
         icons: icons.clone(),
     };
 
+    // Sign staged Windows PE binary *before* archiving into `.zip` or NSIS installer
+    if cfg!(target_os = "windows") {
+        let _ = sign_windows_executable(runner, &staged, signing, &staged.binary_path)?;
+    }
+
     let mut artifacts = BuildArtifacts {
         app_dir: app_bundle_dir,
         binary_path: staged_bin,
@@ -218,6 +245,7 @@ where
         macos_app_path: None,
         dmg_path: None,
         checksums_path: None,
+        latest_json_path: None,
     };
 
     if opts.format == BundleFormat::Bin {
@@ -243,6 +271,7 @@ where
     }
     if should_run_target(&NsisTarget, opts.format, BundleFormat::Nsis, runner) {
         let p = NsisTarget.package(&staged, runner, &dist_root)?;
+        let _ = sign_windows_executable(runner, &staged, signing, &p)?;
         hashable_files.push(p.clone());
         artifacts.nsis_path = Some(p);
     }
@@ -253,13 +282,30 @@ where
     }
     if should_run_target(&MacAppTarget, opts.format, BundleFormat::App, runner) {
         let p = MacAppTarget.package(&staged, runner, &dist_root)?;
+        let _ = sign_macos_app_bundle(runner, &staged, signing, &p)?;
         artifacts.macos_app_path = Some(p);
     }
     if should_run_target(&DmgTarget, opts.format, BundleFormat::Dmg, runner) {
-        let p = DmgTarget.package(&staged, runner, &dist_root)?;
+        let p = DmgTarget.package_signed(&staged, signing, runner, &dist_root)?;
+        let _ = sign_and_notarize_macos_dmg(runner, &staged, signing, &p)?;
         hashable_files.push(p.clone());
         artifacts.dmg_path = Some(p);
     }
+
+    // Prefer OS-native self-updatable artifact order: AppImage -> NSIS -> DMG -> Tarball -> Zip -> Deb
+    artifacts.latest_json_path = maybe_write_signed_update_manifest(
+        &dist_root,
+        &staged,
+        signing,
+        &[
+            artifacts.appimage_path.clone(),
+            artifacts.nsis_path.clone(),
+            artifacts.dmg_path.clone(),
+            artifacts.tarball_path.clone(),
+            artifacts.zip_path.clone(),
+            artifacts.deb_path.clone(),
+        ],
+    )?;
 
     if !hashable_files.is_empty() {
         artifacts.checksums_path = write_sha256sums(&dist_root, &hashable_files)?;

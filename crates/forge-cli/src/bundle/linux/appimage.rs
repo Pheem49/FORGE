@@ -59,8 +59,21 @@ impl BundleTarget for AppImageTarget {
             }
         })?;
 
+        let (exec_suffix, mime_line) = if app.manifest.app.schemes.is_empty() {
+            ("", String::new())
+        } else {
+            let handlers: String = app
+                .manifest
+                .app
+                .schemes
+                .iter()
+                .map(|s| format!("x-scheme-handler/{s};"))
+                .collect();
+            (" %u", format!("MimeType={handlers}\n"))
+        };
+
         let desktop = format!(
-            "[Desktop Entry]\nType=Application\nName={}\nComment={}\nExec={}\nIcon={}\nCategories={};\nTerminal=false\n",
+            "[Desktop Entry]\nType=Application\nName={}\nComment={}\nExec={}{exec_suffix}\nIcon={}\nCategories={};\nTerminal=false\n{mime_line}",
             app.manifest.window.title,
             app.description(),
             app.bin_name,

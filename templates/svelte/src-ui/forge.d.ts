@@ -5,6 +5,8 @@ export interface ForgeError extends Error {
   readonly details?: unknown;
 }
 
+export type ForgeCloseBehavior = "close" | "hide" | "emit";
+
 export interface ForgeCreateWindowOptions {
   label: string;
   url?: string;
@@ -16,14 +18,19 @@ export interface ForgeCreateWindowOptions {
   resizable?: boolean;
   decorations?: boolean;
   visible?: boolean;
+  always_on_top?: boolean;
+  on_close?: ForgeCloseBehavior;
 }
 
 export interface ForgeWindowBridge {
   readonly label: string;
   close(): Promise<void>;
+  destroy(): Promise<void>;
   minimize(minimized?: boolean): Promise<void>;
   maximize(maximized?: boolean): Promise<void>;
   toggleFullscreen(fullscreen?: boolean): Promise<void>;
+  setAlwaysOnTop(alwaysOnTop?: boolean): Promise<void>;
+  setOnClose(onClose: ForgeCloseBehavior): Promise<void>;
   setTitle(title: string): Promise<void>;
   show(): Promise<void>;
   hide(): Promise<void>;
@@ -39,11 +46,16 @@ export interface ForgeBridge {
   invoke<Res = unknown, N extends string = string>(
     command: N,
     ...args: N extends keyof ForgeCommandTypes
-      ? [payload: ForgeCommandTypes[N]["payload"]]
-      : [payload?: unknown]
+      ? [payload: ForgeCommandTypes[N]["payload"], meta?: unknown]
+      : [payload?: unknown, meta?: unknown]
   ): Promise<
     N extends keyof ForgeCommandTypes ? ForgeCommandTypes[N]["result"] : Res
   >;
+  invokeBytes(
+    command: string,
+    payload?: Uint8Array | ArrayBuffer | unknown,
+    meta?: unknown
+  ): Promise<Uint8Array>;
   listen<Payload = unknown>(
     event: string,
     handler: (payload: Payload) => void

@@ -17,11 +17,14 @@ name = "forge"
 path = "src/main.rs"
 
 [dependencies]
+base64.workspace = true
 clap.workspace = true
 dirs.workspace = true
 download-cef.workspace = true
+ed25519-dalek.workspace = true
 flate2.workspace = true
-forge = { package = "forge-app", path = "../forge", version = "0.3.0", default-features = false }
+forge = { package = "forge-app", path = "../forge", version = "0.4.0", default-features = false }
+getrandom.workspace = true
 image.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -56,6 +56,21 @@ impl BundleTarget for MacAppTarget {
             .copyright
             .as_deref()
             .unwrap_or("Copyright (c) FORGE App");
+        let url_types_xml = if app.manifest.app.schemes.is_empty() {
+            String::new()
+        } else {
+            let schemes_xml: String = app
+                .manifest
+                .app
+                .schemes
+                .iter()
+                .map(|s| format!("        <string>{}</string>\n", xml_escape(s)))
+                .collect();
+            format!(
+                "  <key>CFBundleURLTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleURLName</key>\n      <string>{}</string>\n      <key>CFBundleURLSchemes</key>\n      <array>\n{schemes_xml}      </array>\n    </dict>\n  </array>\n",
+                xml_escape(&app.manifest.app.identifier)
+            )
+        };
         let info_plist = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -81,7 +96,7 @@ impl BundleTarget for MacAppTarget {
   <true/>
   <key>NSHumanReadableCopyright</key>
   <string>{copyright}</string>
-</dict>
+{url_types_xml}</dict>
 </plist>
 "#,
             title = xml_escape(&app.manifest.window.title),
@@ -89,6 +104,7 @@ impl BundleTarget for MacAppTarget {
             identifier = xml_escape(&app.manifest.app.identifier),
             version = xml_escape(&app.manifest.app.version),
             copyright = xml_escape(copyright),
+            url_types_xml = url_types_xml,
         );
 
         let plist_path = contents.join("Info.plist");

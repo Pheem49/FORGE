@@ -6,6 +6,7 @@ pub mod dev;
 pub mod doctor;
 pub mod new;
 pub mod permissions;
+pub mod signer;
 
 use std::fmt;
 use std::path::PathBuf;
@@ -167,6 +168,23 @@ pub enum Commands {
         /// Output directory for packaged artifacts (defaults to `<project>/dist`)
         #[arg(long)]
         out_dir: Option<PathBuf>,
+
+        /// Optional Ed25519 private key file used to emit a signed `dist/latest.json` update manifest
+        #[arg(long)]
+        updater_key: Option<PathBuf>,
+
+        /// Base URL prefix written into `dist/latest.json` download URLs
+        #[arg(long)]
+        updater_base_url: Option<String>,
+
+        /// Release notes string embedded into `dist/latest.json`
+        #[arg(long)]
+        release_notes: Option<String>,
+    },
+    /// Generate Ed25519 update keypairs and sign release artifacts (`forge signer keygen` / `sign`)
+    Signer {
+        #[command(subcommand)]
+        action: SignerAction,
     },
     /// Manage declarative `[permissions]` policies in `forge.toml`
     Permissions {
@@ -210,5 +228,40 @@ pub enum PermissionsAction {
         /// Override the runtime used while inspecting commands
         #[arg(long, value_enum)]
         runtime: Option<RuntimeChoice>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SignerAction {
+    /// Generate a new Ed25519 signing keypair for `[updater]` verification
+    Keygen {
+        /// Path for the private key file (public key is written to `<out>.pub`)
+        #[arg(long = "out", default_value = "forge-updater.key")]
+        out_path: PathBuf,
+
+        /// Overwrite existing key files if present
+        #[arg(long)]
+        force: bool,
+    },
+    /// Sign a built release artifact and print its `latest.json` platform entry
+    Sign {
+        /// Path to the built installer or archive file
+        file: PathBuf,
+
+        /// Path to Ed25519 private key file (or set `FORGE_UPDATER_PRIVATE_KEY`)
+        #[arg(long = "key")]
+        key_path: Option<PathBuf>,
+
+        /// Optional release SemVer string bound into the signature (defaults to `0.1.0`)
+        #[arg(long)]
+        version: Option<String>,
+
+        /// Optional download URL written into the signed entry
+        #[arg(long)]
+        url: Option<String>,
+
+        /// Optional target `<os>-<arch>` override (defaults to current host platform)
+        #[arg(long)]
+        platform: Option<String>,
     },
 }

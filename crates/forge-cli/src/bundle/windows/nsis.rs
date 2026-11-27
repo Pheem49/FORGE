@@ -61,6 +61,21 @@ impl BundleTarget for NsisTarget {
             ""
         };
 
+        let safe_title = nsis_escape(&app.manifest.window.title);
+        let safe_publisher = nsis_escape(app.publisher());
+        let safe_version = nsis_escape(&app.manifest.app.version);
+
+        let mut scheme_install = String::new();
+        let mut scheme_uninstall = String::new();
+        for scheme in &app.manifest.app.schemes {
+            scheme_install.push_str(&format!(
+                "  WriteRegStr HKCU \"Software\\Classes\\{scheme}\" \"\" \"URL:{safe_title} Protocol\"\n  WriteRegStr HKCU \"Software\\Classes\\{scheme}\" \"URL Protocol\" \"\"\n  WriteRegStr HKCU \"Software\\Classes\\{scheme}\\DefaultIcon\" \"\" '\"$INSTDIR\\icon.ico\",0'\n  WriteRegStr HKCU \"Software\\Classes\\{scheme}\\shell\\open\\command\" \"\" '\"$INSTDIR\\{bin_filename}\" \"%1\"'\n"
+            ));
+            scheme_uninstall.push_str(&format!(
+                "  DeleteRegKey HKCU \"Software\\Classes\\{scheme}\"\n"
+            ));
+        }
+
         let script = format!(
             r#"!include "MUI2.nsh"
 Unicode true
@@ -88,16 +103,16 @@ Section "Install"
   WriteRegStr HKCU "{uninst_key}" "DisplayVersion" "{version}"
   WriteRegStr HKCU "{uninst_key}" "Publisher" "{publisher}"
   WriteRegStr HKCU "{uninst_key}" "UninstallString" '"$INSTDIR\Uninstall.exe"'
-SectionEnd
+{scheme_install}SectionEnd
 
 Section "Uninstall"
   Delete "$SMPROGRAMS\{title}\{title}.lnk"
   RMDir "$SMPROGRAMS\{title}"
   RMDir /r "$INSTDIR"
   DeleteRegKey HKCU "{uninst_key}"
-SectionEnd
+{scheme_uninstall}SectionEnd
 "#,
-            title = app.manifest.window.title,
+            title = safe_title,
             out_file = out_installer.display(),
             app_name = app.manifest.app.name,
             ico_path = app.icons.ico_path.display(),
@@ -105,8 +120,10 @@ SectionEnd
             app_dir = app.app_dir.display(),
             bin_filename = bin_filename,
             uninst_key = uninst_key,
-            version = app.manifest.app.version,
-            publisher = app.publisher(),
+            version = safe_version,
+            publisher = safe_publisher,
+            scheme_install = scheme_install,
+            scheme_uninstall = scheme_uninstall,
         );
 
         fs::write(&nsi_path, script).map_err(|e| CliError::Io {
@@ -130,4 +147,10 @@ SectionEnd
 
         Ok(out_installer)
     }
+}
+
+fn nsis_escape(raw: &str) -> String {
+    raw.replace('$', "$$")
+        .replace('"', "$\\\"")
+        .replace(['\r', '\n'], " ")
 }

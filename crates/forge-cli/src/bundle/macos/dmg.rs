@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::app::MacAppTarget;
+use crate::bundle::sign::{SigningOptions, sign_macos_app_bundle};
 use crate::bundle::staged::{StagedApp, create_dir_all};
 use crate::bundle::target::BundleTarget;
 use crate::dev::{CommandSpec, ProcessRunner};
@@ -10,22 +11,13 @@ use crate::{CliError, Result};
 
 pub struct DmgTarget;
 
-impl BundleTarget for DmgTarget {
-    fn id(&self) -> &'static str {
-        "dmg"
-    }
-
-    fn supported_on_host(&self) -> bool {
-        cfg!(target_os = "macos")
-    }
-
-    fn required_tool(&self) -> Option<&'static str> {
-        Some("hdiutil")
-    }
-
-    fn package(
+impl DmgTarget {
+    /// Stages and inside-out signs `<Title>.app` inside `dmg_staging` *before* running `hdiutil create`
+    /// so Apple `notarytool` and Gatekeeper validate both the `.dmg` container and the inner `.app`.
+    pub fn package_signed(
         &self,
         app: &StagedApp,
+        signing: &SigningOptions,
         runner: &dyn ProcessRunner,
         out_dir: &Path,
     ) -> Result<PathBuf> {
@@ -37,8 +29,8 @@ impl BundleTarget for DmgTarget {
         }
         create_dir_all(&dmg_staging)?;
 
-        // Stage the `.app` bundle inside `dmg_staging`
-        let _staged_app = MacAppTarget.package(app, runner, &dmg_staging)?;
+        let staged_app = MacAppTarget.package(app, runner, &dmg_staging)?;
+        let _ = sign_macos_app_bundle(runner, app, signing, &staged_app)?;
 
         let dmg_out = out_dir.join(format!(
             "{}-{}-{}.dmg",
@@ -75,5 +67,28 @@ impl BundleTarget for DmgTarget {
         }
 
         Ok(dmg_out)
+    }
+}
+
+impl BundleTarget for DmgTarget {
+    fn id(&self) -> &'static str {
+        "dmg"
+    }
+
+    fn supported_on_host(&self) -> bool {
+        cfg!(target_os = "macos")
+    }
+
+    fn required_tool(&self) -> Option<&'static str> {
+        Some("hdiutil")
+    }
+
+    fn package(
+        &self,
+        app: &StagedApp,
+        runner: &dyn ProcessRunner,
+        out_dir: &Path,
+    ) -> Result<PathBuf> {
+        self.package_signed(app, &SigningOptions::default(), runner, out_dir)
     }
 }
