@@ -14,6 +14,12 @@
   const incFiveBtn = document.getElementById("inc-five-btn");
   const maxBtn = document.getElementById("max-btn");
   const restoreBtn = document.getElementById("restore-btn");
+  const pinBtn = document.getElementById("pin-btn");
+  const binEchoBtn = document.getElementById("bin-echo-btn");
+  const closeBanner = document.getElementById("close-confirm-banner");
+  const confirmDestroyBtn = document.getElementById("confirm-destroy-btn");
+  const cancelCloseBtn = document.getElementById("cancel-close-btn");
+  let pinnedTop = false;
   const noteInput = document.getElementById("note-input");
   const saveNoteBtn = document.getElementById("save-note-btn");
   const copyNoteBtn = document.getElementById("copy-note-btn");
@@ -55,6 +61,11 @@
 
   window.forge.listen("bench.greeted", (payload) => {
     recordLog("[event] bench.greeted:", payload.greeting, false);
+  });
+
+  window.forge.listen("window:close-requested", () => {
+    closeBanner.hidden = false;
+    recordLog("[event] window:close-requested:", "intercepted close (confirm or cancel)", false);
   });
 
   async function loadHostStatus() {
@@ -112,6 +123,24 @@
   incFiveBtn.addEventListener("click", () => stepCounter(5));
   maxBtn.addEventListener("click", () => timedInvoke("bench.window", { action: "maximize" }));
   restoreBtn.addEventListener("click", () => timedInvoke("bench.window", { action: "restore" }));
+  pinBtn.addEventListener("click", async () => {
+    pinnedTop = !pinnedTop;
+    await window.forge.window.setAlwaysOnTop(pinnedTop);
+    recordLog("[window] always_on_top:", String(pinnedTop), false);
+  });
+  binEchoBtn.addEventListener("click", async () => {
+    const sample = new Uint8Array([0x01, 0x02, 0x03, 0xff]);
+    const t0 = performance.now();
+    const reversed = await window.forge.invokeBytes("bench.reverse_bytes", sample);
+    const dt = performance.now() - t0;
+    recordLog(`[${dt.toFixed(2)} ms] bench.reverse_bytes:`, Array.from(reversed).join(","), false);
+  });
+  confirmDestroyBtn.addEventListener("click", () => {
+    window.forge.window.destroy();
+  });
+  cancelCloseBtn.addEventListener("click", () => {
+    closeBanner.hidden = true;
+  });
 
   saveNoteBtn.addEventListener("click", async () => {
     noteFeedback.classList.remove("is-error");

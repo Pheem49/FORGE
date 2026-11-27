@@ -35,7 +35,7 @@ default = "cef" # "webview" | "cef"
 
 ```toml
 [dependencies]
-forge = { package = "forge-app", version = "0.3", default-features = false }
+forge = { package = "forge-app", version = "0.4", default-features = false }
 
 [features]
 default = ["webview"]
@@ -96,4 +96,5 @@ Chromium spawns helper processes (`--type=renderer`, `--type=gpu-process`, `--ty
 
 ### Window Identification & Native Desktop UI
 - `SchemeHandlerFactory::create` receives `browser: Option<&mut Browser>` with a stable `Browser::identifier()` (`Some(1)`, `Some(2)`, ...) for every asset and `fetch()` request, allowing multi-window routing to map browser IDs to FORGE window labels (falling back to `"main"` when `browser` is `None`).
-- System tray (`tray-icon`) and native menu bars (`muda`) on Linux rely on a GTK main loop, whereas `CefHost` runs Chromium's Aura/Views message pump. Tray and menu operations are first-class on `WebViewHost` and return a typed `FORGE_UNSUPPORTED` (`501`) error on `CefHost` rather than silently no-oping.
+- **Frameless Drag Regions & Close Interception:** `CefHost` implements `DragHandler::on_draggable_regions_changed` → `Window::set_draggable_regions` (automatically styled for `[data-forge-drag-region]`), `Window::set_always_on_top`, and `WindowDelegate::can_close` honoring `on_close = "close" | "hide" | "emit"` and `window.destroy()`.
+- System tray (`tray-icon`), native menu bars (`muda`), and `global-hotkey` rely on OS/GTK window loops whereas `CefHost` runs Chromium's Aura/Views message pump; they are first-class on `WebViewHost` and return a typed `FORGE_UNSUPPORTED` (`501`) error on `CefHost` rather than silently no-oping.

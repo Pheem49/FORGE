@@ -9,13 +9,14 @@ Both the `forge-app` runtime crate (`forge::Manifest`) and `forge-cli` share a s
 ```toml
 [app]
 name = "forge-notes"
-version = "0.3.0"
+version = "0.4.0"
 description = "Fast cross-runtime desktop notes"
 identifier = "dev.forge.notes"
 assets = "dist-ui"
 icon = "icons/icon.png"
 single_instance = true
 exit_on_last_window_close = true
+schemes = ["forge-notes"]
 
 [window] # Primary "main" window
 url = "/index.html"
@@ -27,6 +28,8 @@ min_height = 480
 resizable = true
 decorations = true
 visible = true
+always_on_top = false
+on_close = "emit" # "close" (default) | "hide" | "emit"
 devtools = true
 remember_state = true
 create_on_startup = true
@@ -77,6 +80,19 @@ publisher = "FORGE Labs"
 category = "Productivity"
 copyright = "Copyright (c) 2026 FORGE Labs"
 homepage = "https://github.com/Pheem49/FORGE"
+
+[bundle.macos]
+signing_identity = "Developer ID Application: FORGE Labs (TEAM123)"
+entitlements = "macos/entitlements.plist"
+notary_profile = "forge-notary"
+
+[bundle.windows]
+certificate_thumbprint = "0123456789ABCDEF0123456789ABCDEF01234567"
+timestamp_url = "http://timestamp.digicert.com"
+
+[updater]
+endpoints = ["https://github.com/Pheem49/FORGE/releases/latest/download/latest.json"]
+pubkey = "BASE64_ED25519_PUBLIC_KEY"
 ```
 
 ---

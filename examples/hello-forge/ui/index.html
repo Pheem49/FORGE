@@ -8,11 +8,11 @@
   </head>
   <body>
     <main class="workbench">
-      <header class="masthead">
+      <header class="masthead" data-forge-drag-region>
         <div class="masthead-title">
-          <h1>FORGE Workbench <span class="ver">v0.2</span></h1>
+          <h1>FORGE Workbench <span class="ver">v0.4</span></h1>
           <p class="subtitle">
-            One Rust codebase running across System WebView and Chromium with live push events and native plugins.
+            One Rust codebase running across System WebView and Chromium with binary IPC, lifecycle hooks, and native plugins.
           </p>
         </div>
         <div class="badges">
@@ -60,6 +60,13 @@
               <button type="button" id="inc-five-btn" class="btn-secondary">Add 5</button>
               <button type="button" id="max-btn" class="btn-secondary">Maximize</button>
               <button type="button" id="restore-btn" class="btn-secondary">Restore</button>
+              <button type="button" id="pin-btn" class="btn-secondary">Toggle Pin</button>
+              <button type="button" id="bin-echo-btn" class="btn-secondary">Binary Reverse</button>
+            </div>
+            <div id="close-confirm-banner" class="feedback" hidden>
+              <span>Close requested — exit workbench now?</span>
+              <button type="button" id="confirm-destroy-btn" class="btn-primary">Exit</button>
+              <button type="button" id="cancel-close-btn" class="btn-ghost">Stay</button>
             </div>
           </div>
 

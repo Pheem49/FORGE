@@ -35,10 +35,14 @@ jobs:
       - name: Check formatting
         if: runner.os == 'Linux'
         run: cargo fmt --all -- --check
-      - name: Run Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Run Headless & CLI E2E Tests
-        run: cargo test --workspace
+      - name: Run Clippy (Default & Full Features)
+        run: |
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo clippy --workspace --all-targets --features forge-app/plugins,forge-app/desktop-ui -- -D warnings
+      - name: Run Headless & CLI E2E Tests (Default & Full Plugins)
+        run: |
+          cargo test --workspace
+          cargo test --workspace --features forge-app/plugins,forge-app/desktop-ui
       - name: Type-check all feature combinations (WebView + CEF + Plugins + Desktop UI)
         run: cargo check -p forge-app --features webview,cef,cef/dox,plugins,dev-tools,desktop-ui
 

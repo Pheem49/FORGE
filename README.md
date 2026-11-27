@@ -21,19 +21,19 @@
 | **Bundle Size** | ~2–6 MB standalone / `.deb` / NSIS | Self-contained Chromium bundle / AppImage |
 | **Code Changes** | None | None |
 
-* **Zero Macros, Plain Rust:** Write standard `async fn` handlers with `State<T>`, `WindowHandle`, `AppHandle`, and `AppConfig` extractors—fast compile times and full IDE autocomplete.
+* **Zero Macros, JSON & Raw Binary IPC:** Write standard `async fn` handlers with `State<T>`, `Meta<T>`, `RawBytes`, `WindowHandle`, `AppHandle`, and `AppConfig` extractors—fast compile times, full IDE autocomplete, and zero-overhead `Uint8Array` ↔ `RawBytes` streaming.
 * **Safe by Default (`[permissions]`):** Strict capability allow-list (`mode = "enforce"`), Same-Origin `forge://localhost` protocol, 256-bit `X-Forge-Token` CSRF protection, and canonical symlink-safe sandboxing.
 * **Sub-5ms Headless + Live Smoke Testing:** Verify 95%+ of your app in milliseconds via `App::headless()`, plus prove real native window & IPC execution in CI with `FORGE_SMOKE_TEST=1`.
-* **Zero-Boilerplate Cross-OS Bundler:** `forge build` generates icons (`.png`, `.ico`, `.icns`), embeds UI assets into a single executable, produces `.deb`, `.AppImage`, `.tar.gz`, NSIS `.exe`, `.zip`, `.app`, and `.dmg`, and writes `SHA256SUMS`.
+* **Trusted Cross-OS Bundler & OTA Updater:** `forge build` generates icons, embeds UI assets, packages `.deb`, `.AppImage`, `.tar.gz`, NSIS `.exe`, `.zip`, `.app`, and `.dmg`, code-signs & notarizes macOS/Windows builds, and emits Ed25519-signed `latest.json` manifests for `UpdaterPlugin`.
 
 ---
 
 ## What It Can Do
 
-* **Dual Desktop Runtimes:** Switch between `webview` and `cef` via a single CLI flag (with automated `~/.cache/forge/cef` binary provisioning).
-* **Multi-Window, System Tray & Menus:** Declarative `[windows.<label>]`, `[tray]`, `[menu]`, single-instance lock (`[app] single_instance = true`), and persistent window geometry (`remember_state = true`).
-* **Starter Templates & Typed DX:** `forge new` for `vanilla`, `react`, `vue`, and `svelte`, `forge bindings` for TypeScript `.d.ts` command generation, `forge permissions init`, and `forge doctor`.
-* **Native Desktop Plugins (`forge::plugins`):** File Dialogs, Clipboard, OS Notifications, and sandboxed App Storage.
+* **Dual Desktop Runtimes:** Switch between `webview` and `cef` via a single CLI flag (with automated `~/.cache/forge/cef` binary provisioning and unified `[data-forge-drag-region]` custom titlebars).
+* **Multi-Window, Lifecycle, System Tray & Menus:** Declarative `[windows.<label>]`, close interception (`on_close = "close" | "hide" | "emit"`), `always_on_top`, `[tray]`, `[menu]`, single-instance lock (`[app] single_instance = true`), and persistent window geometry (`remember_state = true`).
+* **Starter Templates & Typed DX:** `forge new` for `vanilla`, `react`, `vue`, and `svelte`, `forge bindings` for TypeScript `.d.ts` command generation, `forge signer keygen`, `forge permissions init`, and `forge doctor`.
+* **Native Desktop Plugins (`forge::plugins`):** File Dialogs, Clipboard, OS Notifications, Sandboxed Text/Binary App Storage, Safe URL Opener, Global Shortcuts, Custom URI Deep Links (`myapp://`), and Signed Auto-Updater.
 
 ---
 
@@ -105,6 +105,7 @@ cargo run -p forge-cli -- build --manifest-path examples/hello-forge/forge.toml 
 ## Documentation
 
 * [Release Notes](RELEASE_NOTES.md) · [Architecture Guide](docs/architecture.md) · [`forge.toml` Reference](docs/forge-toml.md)
-* [Multi-Window & Controls](docs/windows.md) · [System Tray & Menus](docs/tray-and-menu.md) · [Single-Instance Lock](docs/single-instance.md) · [Window State](docs/window-state.md)
+* [Multi-Window & Lifecycle](docs/windows.md) · [Raw Binary IPC](docs/binary-ipc.md) · [Native Plugins](docs/plugins.md) · [Code Signing & Updater](docs/signing-and-updater.md)
+* [System Tray & Menus](docs/tray-and-menu.md) · [Single-Instance Lock](docs/single-instance.md) · [Window State](docs/window-state.md)
 * [Capability Permissions](docs/permissions.md) · [Cross-OS Bundling](docs/bundling.md) · [Chromium (`cef`) Runtime](docs/cef.md)
 * [Typed TS Bindings](docs/typed-bindings.md) · [`forge doctor`](docs/doctor.md) · [Testing & Smoke Mode](docs/testing.md) · [Releasing](docs/releasing.md)

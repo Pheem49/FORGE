@@ -1,9 +1,10 @@
 [app]
 name = "hello-forge"
-version = "0.3.0"
-description = "FORGE v0.3 Multi-Window, Capability-Protected & Dual-Engine Workbench"
+version = "0.4.0"
+description = "FORGE v0.4 Dual-Engine Desktop Workbench"
 identifier = "dev.forge.hello"
 assets = "ui"
+schemes = ["hello-forge"]
 
 [window]
 title = "FORGE Workbench"
@@ -13,6 +14,7 @@ min_width = 700
 min_height = 500
 resizable = true
 decorations = true
+on_close = "emit"
 devtools = true
 
 [runtime]
@@ -27,6 +29,8 @@ allow = [
   "clipboard.*",
   "notification.*",
   "fs.*",
+  "opener.*",
+  "deep_link.*",
   "window.*",
   "event.*",
 ]

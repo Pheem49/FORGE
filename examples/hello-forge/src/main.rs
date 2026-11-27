@@ -3,8 +3,10 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use forge::plugins::{AppFsPlugin, ClipboardPlugin, DialogPlugin, NotificationPlugin};
-use forge::{App, AppConfig, ForgeError, State, WindowHandle};
+use forge::plugins::{
+    AppFsPlugin, ClipboardPlugin, DeepLinkPlugin, DialogPlugin, NotificationPlugin, OpenerPlugin,
+};
+use forge::{App, AppConfig, ForgeError, RawBytes, State, WindowHandle};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -134,6 +136,12 @@ async fn window_control(window: WindowHandle, req: WindowActionReq) -> Result<St
     Ok(req.action)
 }
 
+async fn reverse_bytes(input: RawBytes) -> Result<RawBytes, Infallible> {
+    let mut buf = input.into_inner();
+    buf.reverse();
+    Ok(RawBytes(buf))
+}
+
 pub fn build_app(root: Option<&Path>, fs_root_override: Option<&Path>) -> App {
     let base = match root {
         Some(p) => App::from_root(p),
@@ -148,6 +156,8 @@ pub fn build_app(root: Option<&Path>, fs_root_override: Option<&Path>) -> App {
     base.plugin(DialogPlugin::new())
         .plugin(ClipboardPlugin::new())
         .plugin(NotificationPlugin::new())
+        .plugin(OpenerPlugin::new())
+        .plugin(DeepLinkPlugin::new())
         .plugin(fs_plugin)
         .setup(|ctx| {
             ctx.insert_state(WorkbenchState::default());
@@ -168,6 +178,7 @@ pub fn build_app(root: Option<&Path>, fs_root_override: Option<&Path>) -> App {
         .command("bench.greet", greet)
         .command("bench.increment", step_counter)
         .command("bench.window", window_control)
+        .command("bench.reverse_bytes", reverse_bytes)
 }
 
 fn main() -> forge::Result<()> {
@@ -192,7 +203,13 @@ mod tests {
 
         let status: HostStatus = app.invoke_unit("host.status").await.unwrap();
         assert_eq!(status.app_name, "hello-forge");
-        assert_eq!(status.version, "0.3.0");
+        assert_eq!(status.version, "0.4.0");
+
+        let rev = app
+            .invoke_raw("bench.reverse_bytes", vec![1u8, 2, 3, 4])
+            .await
+            .unwrap();
+        assert_eq!(rev, vec![4u8, 3, 2, 1]);
 
         let out: GreetOutput = app
             .invoke("bench.greet", json!({ "name": "Pheem" }))

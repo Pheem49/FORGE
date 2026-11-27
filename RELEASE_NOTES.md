@@ -4,6 +4,27 @@ All notable features, architectural milestones, and developer tooling updates fo
 
 ---
 
+## v0.4.0 — "Production Desktop Parity & Trusted Distribution" (2026-11-27)
+
+FORGE v0.4 closes the core production desktop gaps relative to Tauri and Electron while keeping FORGE's zero-macro, dual-runtime, and sub-5ms headless-testable design: adding declarative/imperative window close interception, unified custom titlebar drag regions across WebView & CEF Views, zero-overhead raw binary IPC, macOS/Windows code signing + notarization, an Ed25519-verified static OTA auto-updater, and core OS integration plugins (`opener`, `shortcut`, `deep-link`).
+
+### Highlights
+- **Window Lifecycle & CEF Views Parity**
+  - Added `[window] on_close = "close" | "hide" | "emit"` (`CloseBehavior`), `window:close-requested` interception, `WindowHandle::destroy()` / `window.forge.window.destroy()`, and `always_on_top` across `WebViewHost`, `CefHost` (`WindowDelegate::can_close` + `set_always_on_top`), and `HeadlessApp::request_close`.
+  - Added unified frameless titlebar drag regions via `[data-forge-drag-region]` / `[data-forge-no-drag]`: delegating `mousedown` on `webview` and wiring Blink CSS `-webkit-app-region: drag` into `CefDragHandler::on_draggable_regions_changed` → `Window::set_draggable_regions` on `cef`.
+- **Zero-Macro Raw Binary IPC (`RawBytes` & `Meta<T>`)**
+  - Added `forge::RawBytes` (`application/octet-stream`) and `forge::Meta<T>` (`X-Forge-Meta` JSON header extractor) supporting all 6 payload/reply combinations alongside standard `FromContext` extractors with zero procedural macros.
+  - Updated `window.forge.invoke` / `invokeBytes` to automatically send and receive `Uint8Array` / `ArrayBuffer`, and added `fs.read_bytes` / `fs.write_bytes` to `AppFsPlugin`.
+- **Code Signing, Notarization & Ed25519 Auto-Updater**
+  - Added `CodeSigner` (`bundle/sign.rs`) behind `ProcessRunner`: inside-out macOS `codesign` (`dylib` → CEF helper `.app`s → `CEF.framework` → binary → `.app`) + `xcrun notarytool` + `xcrun stapler`, and Windows pre/post-NSIS `signtool`.
+  - Added `forge signer keygen` / `forge signer sign`, `forge build --updater-key` emitting `dist/latest.json`, and `UpdaterPlugin` (`updater.check`, `updater.download_and_install`) enforcing HTTPS, monotonic SemVer, SHA-256, and metadata-bound Ed25519 verification (`v1\n<version>\n<platform>\n<url>\n<sha256>`).
+- **Core OS Integration Plugins (`opener`, `shortcut`, `deep-link`)**
+  - Added `OpenerPlugin` (`opener.open_url` with strict scheme allow-list blocking `javascript:`, `file:`, `data:`, and CLI flag injection).
+  - Added `GlobalShortcutPlugin` (`shortcut.register` / `unregister` / `unregister_all` / `list` + `shortcut:triggered` + `HeadlessApp::trigger_shortcut`).
+  - Added `DeepLinkPlugin` (`[app] schemes = [...]`, `deep_link.get_current`, `deep-link:open`) integrated with `SingleInstanceGuard` and OS installer manifests (`CFBundleURLTypes` in `Info.plist`, `MimeType=x-scheme-handler/...` in `.desktop`, and `HKCU\Software\Classes\...` in NSIS).
+
+---
+
 ## v0.3.0 — "Trustworthy & Shippable" (2026-11-26)
 
 FORGE v0.3 proves both runtimes (`webview` and real Chromium 156 `cef`) live end-to-end, enforces capability permissions by default, adds full desktop application features (multi-window, CEF Views API, system tray, native menus, single-instance lock, window-state persistence), expands `forge build` into a cross-OS installer pipeline, and rounds out developer tooling (`forge doctor`, `forge bindings`, Vue 3 & Svelte 5 templates, 3-OS CI & release workflows).
