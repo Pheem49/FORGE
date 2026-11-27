@@ -37,19 +37,66 @@
 
 ---
 
-## How to Use
+## Installation
 
-### 1. Install CLI, Check Environment & Create a Project
+### 1. System Prerequisites
+
+* **All Platforms:** [Rust 1.92+](https://rustup.rs/) (`rustc` & `cargo`). [Node.js 18+](https://nodejs.org/) is only needed when using the `react`, `vue`, or `svelte` templates.
+* **Linux (Ubuntu / Debian / Pop!\_OS):**
+  ```bash
+  sudo apt update && sudo apt install -y \
+    libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+    build-essential pkg-config patchelf
+  ```
+* **Windows:** [Visual Studio C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) (WebView2 is included with Windows 10/11; [NSIS](https://nsis.sourceforge.io/) is optional for `.exe` installers).
+* **macOS:** Xcode Command Line Tools (`xcode-select --install`).
+
+### 2. Install the `forge` CLI
+
+Choose any of the following installation methods (all install the `forge` binary into `~/.cargo/bin`):
+
+**Option A — From crates.io (Recommended):**
+```bash
+cargo install forge-app-cli
+```
+
+**Option B — Directly from GitHub (latest `main`):**
+```bash
+cargo install --git https://github.com/Pheem49/FORGE forge-app-cli
+```
+
+**Option C — From Local Source:**
+```bash
+git clone https://github.com/Pheem49/FORGE.git
+cd FORGE
+cargo install --path crates/forge-cli
+```
+
+Verify your environment at any time with:
+```bash
+forge doctor
+```
+
+### 3. Add Library to an Existing Cargo Project (Optional)
+
+If you prefer wiring FORGE manually without `forge new`, add `forge-app` to your `Cargo.toml`:
+
+```toml
+[dependencies]
+forge = { package = "forge-app", version = "0.4", features = ["plugins", "desktop-ui"] }
+```
+
+---
+
+## Quick Start
+
+### 1. Scaffold a New Project
 
 ```bash
-# Install the `forge` CLI globally from crates.io
-cargo install forge-app-cli
-
-# Verify compilers, WebView/CEF libraries, and packagers
-forge doctor
-
-# Scaffold Vanilla, React, Vue 3, or Svelte 5
+# Templates: vanilla | react | vue | svelte
 forge new my-app --template react
+cd my-app
+npm install
 ```
 
 ### 2. Write Rust Commands & Declare Permissions
