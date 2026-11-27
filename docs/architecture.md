@@ -8,7 +8,7 @@ FORGE follows **Deep Module** design principles (`codebase-design`): hiding dual
 
 1. **`crates/forge` (Cargo package: `forge-app`, library: `forge`)**
    - **Public Surface:** `App`, `SetupContext`, `AppHandle`, `WindowHandle`, `WindowOptions`, `CloseBehavior`, `State<T>`, `Meta<T>`, `RawBytes`, `AppConfig`, `Config`, `Manifest`, `Error`, `ErrorKind`, `ForgeError`, `Plugin`, `HeadlessApp`, `SingleInstanceGuard`, `WindowStateStore`, and `forge::plugins::*`.
-   - **Shared Manifest Schema (`manifest.rs`):** Single source of truth for `forge.toml` (`[app]`, `[window]`, `[windows.*]`, `[runtime]`, `[dev]`, `[permissions]`, `[tray]`, `[menu]`, `[bundle]`, `[bundle.macos]`, `[bundle.windows]`, `[updater]`) plus `UpdateReleaseManifest` (`latest.json`), consumed by both `forge-app` and `forge-cli` (`default-features = false`).
+   - **Shared Manifest Schema (`manifest.rs`):** Single source of truth for `forge.toml` (`[app]`, `[window]`, `[windows.*]`, `[runtime]`, `[dev]`, `[permissions]`, `[tray]`, `[menu]`, `[bundle]`, `[bundle.macos]`, `[bundle.windows]`, `[updater]`) plus `UpdateReleaseManifest` (`latest.json`), consumed by both `forge-app` and `forge-app-cli` (`default-features = false`).
    - **Private `kernel/` Submodules:**
      - `mod.rs` — Engine-neutral `ForgeKernel::handle_request` router and `dispatch_async`.
      - `ipc.rs` — POST/CSRF/token verification, single-choke-point `PermissionPolicy::check`, `application/json` & `application/octet-stream` (`RawBytes` + `X-Forge-Meta`) routing, and `CatchUnwindFuture` panic containment.
@@ -22,7 +22,7 @@ FORGE follows **Deep Module** design principles (`codebase-design`): hiding dual
      - `WebViewHost` (`tao` + `wry` + optional `tray-icon` / `muda` `desktop-ui` + `global-hotkey` `plugin-shortcut`).
      - `CefHost` (`cef-rs` Chromium 156 **Views API**: `window_create_top_level` + `browser_view_create` + `ForgeDragHandler` + `can_close` gate + `Browser::identifier()` window mapping).
 
-2. **`crates/forge-cli` (Cargo package: `forge-cli`, binary: `forge`)**
+2. **`crates/forge-cli` (Cargo package: `forge-app-cli`, binary: `forge`)**
    - `forge new` — Scaffolds `vanilla`, `react`, `vue`, or `svelte` projects.
    - `forge dev` — Runs `[dev].before_dev_command`, enables live reload, provisions `~/.cache/forge/cef`, and launches the app.
    - `forge build` — Compiles release binaries with embedded UI archives, packages OS installers (`deb`, `appimage`, `tarball`, `nsis`, `zip`, `app`, `dmg`) with custom URI scheme registration, runs `CodeSigner` (`codesign` + `notarytool` + `stapler` / `signtool`), and writes `dist/latest.json` + `SHA256SUMS`.

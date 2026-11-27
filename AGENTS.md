@@ -10,8 +10,7 @@ FORGE is a Rust-first desktop application platform (**"Write once. Choose your r
 
 ### Workspace Structure
 - `crates/forge/` (`package = "forge-app"`, `[lib] name = "forge"`) — Core desktop module (`App`, `SetupContext`, `AppHandle`, `WindowHandle`, `State<T>`, `Manifest`, `ForgeKernel`, `HeadlessApp`, `forge::plugins`, `single_instance`, `window_state`, and internal `RuntimeHost` adapters for `webview` and `cef`).
-- `crates/forge-cli/` (`package = "forge-cli"`, `[[bin]] name = "forge"`) — Developer CLI (`forge new`, `forge dev`, `forge build`, `forge permissions init`, `forge bindings`, `forge doctor`, and automated CEF binary caching).
-- `templates/` — Starter project templates (`vanilla`, `react`, `vue`, `svelte`).
+- `crates/forge-cli/` (`package = "forge-app-cli"`, `[lib] name = "forge_cli"`, `[[bin]] name = "forge"`) — Developer CLI (`forge new`, `forge dev`, `forge build`, `forge signer`, `forge permissions init`, `forge bindings`, `forge doctor`, starter `templates/`, and automated CEF binary caching).
 - `examples/hello-forge/` — Reference diagnostic workbench demonstrating commands, push events, window controls, permissions, and native plugins.
 - `docs/` — Architecture and per-feature documentation.
 
@@ -33,9 +32,9 @@ FORGE is a Rust-first desktop application platform (**"Write once. Choose your r
 
 Follow **Deep Module** principles:
 - **Keep the external interface small and zero-macro.** Prefer plain `async fn` handlers with sealed `FromContext` extractors (`State<T>`, `WindowHandle`, `AppHandle`, `AppConfig`) over procedural macros.
-- **One shared manifest schema.** `forge::manifest::Manifest` is shared by `forge-app` and `forge-cli` (`default-features = false`); never duplicate `forge.toml` structs across crates.
+- **One shared manifest schema.** `forge::manifest::Manifest` is shared by `forge-app` and `forge-app-cli` (`default-features = false`); never duplicate `forge.toml` structs across crates.
 - **Accept dependencies at seams, don't bypass them.** External OS/CLI tools (`cargo`, `patchelf`, `dpkg-deb`, `appimagetool`, `makensis`, `hdiutil`, `pkg-config`, dev servers) must go through `ProcessRunner` / `CefProvisioner` / `BundleTarget` seams so automated tests verify them without network downloads or display servers.
-- **The interface is the test surface.** Write integration tests against `App::headless()`, `FORGE_SMOKE_TEST=1`, and `forge-cli` entry points asserting observable outcomes.
+- **The interface is the test surface.** Write integration tests against `App::headless()`, `FORGE_SMOKE_TEST=1`, and `forge-app-cli` entry points asserting observable outcomes.
 
 ---
 

@@ -39,14 +39,17 @@
 
 ## How to Use
 
-### 1. Check Environment & Create a Project
+### 1. Install CLI, Check Environment & Create a Project
 
 ```bash
+# Install the `forge` CLI globally from crates.io
+cargo install forge-app-cli
+
 # Verify compilers, WebView/CEF libraries, and packagers
-cargo run -p forge-cli -- doctor
+forge doctor
 
 # Scaffold Vanilla, React, Vue 3, or Svelte 5
-cargo run -p forge-cli -- new my-app --template react
+forge new my-app --template react
 ```
 
 ### 2. Write Rust Commands & Declare Permissions
@@ -93,11 +96,11 @@ const res = await window.forge.invoke<{ message: string }>("greet", { name: "Phe
 
 ```bash
 # Live dev mode (OS System WebView or Chromium CEF)
-cargo run -p forge-cli -- dev --manifest-path examples/hello-forge/forge.toml --runtime webview
-cargo run -p forge-cli -- dev --manifest-path examples/hello-forge/forge.toml --runtime cef
+forge dev --runtime webview
+forge dev --runtime cef
 
 # Build release installers + SHA256SUMS into dist/
-cargo run -p forge-cli -- build --manifest-path examples/hello-forge/forge.toml --format all
+forge build --format all
 ```
 
 ---

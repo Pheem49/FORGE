@@ -4,56 +4,56 @@ use std::path::{Path, PathBuf};
 use crate::{CliError, Result, RuntimeChoice, TemplateChoice};
 
 // Vanilla starter template
-const VANILLA_FORGE_TOML: &str = include_str!("../../../templates/vanilla/forge.toml.tmpl");
-const VANILLA_CARGO_TOML: &str = include_str!("../../../templates/vanilla/Cargo.toml.tmpl");
-const VANILLA_GITIGNORE: &str = include_str!("../../../templates/vanilla/gitignore.tmpl");
-const VANILLA_MAIN_RS: &str = include_str!("../../../templates/vanilla/src/main.rs");
-const VANILLA_INDEX_HTML: &str = include_str!("../../../templates/vanilla/ui/index.html");
-const VANILLA_STYLE_CSS: &str = include_str!("../../../templates/vanilla/ui/style.css");
-const VANILLA_MAIN_JS: &str = include_str!("../../../templates/vanilla/ui/main.js");
+const VANILLA_FORGE_TOML: &str = include_str!("../templates/vanilla/forge.toml.tmpl");
+const VANILLA_CARGO_TOML: &str = include_str!("../templates/vanilla/Cargo.toml.tmpl");
+const VANILLA_GITIGNORE: &str = include_str!("../templates/vanilla/gitignore.tmpl");
+const VANILLA_MAIN_RS: &str = include_str!("../templates/vanilla/src/main.rs");
+const VANILLA_INDEX_HTML: &str = include_str!("../templates/vanilla/ui/index.html");
+const VANILLA_STYLE_CSS: &str = include_str!("../templates/vanilla/ui/style.css");
+const VANILLA_MAIN_JS: &str = include_str!("../templates/vanilla/ui/main.js");
 
 // React (Vite + TypeScript) starter template
-const REACT_FORGE_TOML: &str = include_str!("../../../templates/react/forge.toml.tmpl");
-const REACT_CARGO_TOML: &str = include_str!("../../../templates/react/Cargo.toml.tmpl");
-const REACT_GITIGNORE: &str = include_str!("../../../templates/react/gitignore.tmpl");
-const REACT_PACKAGE_JSON: &str = include_str!("../../../templates/react/package.json.tmpl");
-const REACT_VITE_CONFIG: &str = include_str!("../../../templates/react/vite.config.ts");
-const REACT_TSCONFIG: &str = include_str!("../../../templates/react/tsconfig.json");
-const REACT_INDEX_HTML: &str = include_str!("../../../templates/react/index.html");
-const REACT_MAIN_RS: &str = include_str!("../../../templates/react/src/main.rs");
-const REACT_FORGE_DTS: &str = include_str!("../../../templates/react/src-ui/forge.d.ts");
-const REACT_MAIN_TSX: &str = include_str!("../../../templates/react/src-ui/main.tsx");
-const REACT_APP_TSX: &str = include_str!("../../../templates/react/src-ui/App.tsx");
-const REACT_STYLE_CSS: &str = include_str!("../../../templates/react/src-ui/style.css");
+const REACT_FORGE_TOML: &str = include_str!("../templates/react/forge.toml.tmpl");
+const REACT_CARGO_TOML: &str = include_str!("../templates/react/Cargo.toml.tmpl");
+const REACT_GITIGNORE: &str = include_str!("../templates/react/gitignore.tmpl");
+const REACT_PACKAGE_JSON: &str = include_str!("../templates/react/package.json.tmpl");
+const REACT_VITE_CONFIG: &str = include_str!("../templates/react/vite.config.ts");
+const REACT_TSCONFIG: &str = include_str!("../templates/react/tsconfig.json");
+const REACT_INDEX_HTML: &str = include_str!("../templates/react/index.html");
+const REACT_MAIN_RS: &str = include_str!("../templates/react/src/main.rs");
+const REACT_FORGE_DTS: &str = include_str!("../templates/react/src-ui/forge.d.ts");
+const REACT_MAIN_TSX: &str = include_str!("../templates/react/src-ui/main.tsx");
+const REACT_APP_TSX: &str = include_str!("../templates/react/src-ui/App.tsx");
+const REACT_STYLE_CSS: &str = include_str!("../templates/react/src-ui/style.css");
 
 // Vue 3 (Vite + TypeScript) starter template
-const VUE_FORGE_TOML: &str = include_str!("../../../templates/vue/forge.toml.tmpl");
-const VUE_CARGO_TOML: &str = include_str!("../../../templates/vue/Cargo.toml.tmpl");
-const VUE_GITIGNORE: &str = include_str!("../../../templates/vue/gitignore.tmpl");
-const VUE_PACKAGE_JSON: &str = include_str!("../../../templates/vue/package.json.tmpl");
-const VUE_VITE_CONFIG: &str = include_str!("../../../templates/vue/vite.config.ts");
-const VUE_TSCONFIG: &str = include_str!("../../../templates/vue/tsconfig.json");
-const VUE_INDEX_HTML: &str = include_str!("../../../templates/vue/index.html");
-const VUE_MAIN_RS: &str = include_str!("../../../templates/vue/src/main.rs");
-const VUE_FORGE_DTS: &str = include_str!("../../../templates/vue/src-ui/forge.d.ts");
-const VUE_ENV_DTS: &str = include_str!("../../../templates/vue/src-ui/env.d.ts");
-const VUE_MAIN_TS: &str = include_str!("../../../templates/vue/src-ui/main.ts");
-const VUE_APP_VUE: &str = include_str!("../../../templates/vue/src-ui/App.vue");
-const VUE_STYLE_CSS: &str = include_str!("../../../templates/vue/src-ui/style.css");
+const VUE_FORGE_TOML: &str = include_str!("../templates/vue/forge.toml.tmpl");
+const VUE_CARGO_TOML: &str = include_str!("../templates/vue/Cargo.toml.tmpl");
+const VUE_GITIGNORE: &str = include_str!("../templates/vue/gitignore.tmpl");
+const VUE_PACKAGE_JSON: &str = include_str!("../templates/vue/package.json.tmpl");
+const VUE_VITE_CONFIG: &str = include_str!("../templates/vue/vite.config.ts");
+const VUE_TSCONFIG: &str = include_str!("../templates/vue/tsconfig.json");
+const VUE_INDEX_HTML: &str = include_str!("../templates/vue/index.html");
+const VUE_MAIN_RS: &str = include_str!("../templates/vue/src/main.rs");
+const VUE_FORGE_DTS: &str = include_str!("../templates/vue/src-ui/forge.d.ts");
+const VUE_ENV_DTS: &str = include_str!("../templates/vue/src-ui/env.d.ts");
+const VUE_MAIN_TS: &str = include_str!("../templates/vue/src-ui/main.ts");
+const VUE_APP_VUE: &str = include_str!("../templates/vue/src-ui/App.vue");
+const VUE_STYLE_CSS: &str = include_str!("../templates/vue/src-ui/style.css");
 
 // Svelte 5 (Vite + TypeScript) starter template
-const SVELTE_FORGE_TOML: &str = include_str!("../../../templates/svelte/forge.toml.tmpl");
-const SVELTE_CARGO_TOML: &str = include_str!("../../../templates/svelte/Cargo.toml.tmpl");
-const SVELTE_GITIGNORE: &str = include_str!("../../../templates/svelte/gitignore.tmpl");
-const SVELTE_PACKAGE_JSON: &str = include_str!("../../../templates/svelte/package.json.tmpl");
-const SVELTE_VITE_CONFIG: &str = include_str!("../../../templates/svelte/vite.config.ts");
-const SVELTE_TSCONFIG: &str = include_str!("../../../templates/svelte/tsconfig.json");
-const SVELTE_INDEX_HTML: &str = include_str!("../../../templates/svelte/index.html");
-const SVELTE_MAIN_RS: &str = include_str!("../../../templates/svelte/src/main.rs");
-const SVELTE_FORGE_DTS: &str = include_str!("../../../templates/svelte/src-ui/forge.d.ts");
-const SVELTE_MAIN_TS: &str = include_str!("../../../templates/svelte/src-ui/main.ts");
-const SVELTE_APP_SVELTE: &str = include_str!("../../../templates/svelte/src-ui/App.svelte");
-const SVELTE_STYLE_CSS: &str = include_str!("../../../templates/svelte/src-ui/style.css");
+const SVELTE_FORGE_TOML: &str = include_str!("../templates/svelte/forge.toml.tmpl");
+const SVELTE_CARGO_TOML: &str = include_str!("../templates/svelte/Cargo.toml.tmpl");
+const SVELTE_GITIGNORE: &str = include_str!("../templates/svelte/gitignore.tmpl");
+const SVELTE_PACKAGE_JSON: &str = include_str!("../templates/svelte/package.json.tmpl");
+const SVELTE_VITE_CONFIG: &str = include_str!("../templates/svelte/vite.config.ts");
+const SVELTE_TSCONFIG: &str = include_str!("../templates/svelte/tsconfig.json");
+const SVELTE_INDEX_HTML: &str = include_str!("../templates/svelte/index.html");
+const SVELTE_MAIN_RS: &str = include_str!("../templates/svelte/src/main.rs");
+const SVELTE_FORGE_DTS: &str = include_str!("../templates/svelte/src-ui/forge.d.ts");
+const SVELTE_MAIN_TS: &str = include_str!("../templates/svelte/src-ui/main.ts");
+const SVELTE_APP_SVELTE: &str = include_str!("../templates/svelte/src-ui/App.svelte");
+const SVELTE_STYLE_CSS: &str = include_str!("../templates/svelte/src-ui/style.css");
 
 #[derive(Debug, Clone)]
 pub struct NewOptions {

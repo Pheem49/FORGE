@@ -1118,7 +1118,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "forge-cli"
+name = "forge-app-cli"
 version = "0.4.0"
 dependencies = [
  "base64 0.22.1",

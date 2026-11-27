@@ -1,5 +1,5 @@
 [package]
-name = "forge-cli"
+name = "forge-app-cli"
 description = "Project generator, live dev runner, doctor, and cross-OS desktop bundler CLI for the FORGE platform."
 version.workspace = true
 edition.workspace = true
@@ -11,6 +11,10 @@ readme = "../../README.md"
 keywords = ["desktop", "gui", "bundler", "cef", "webview"]
 categories = ["command-line-utilities", "development-tools::build-utils"]
 exclude = ["/target", "/dist"]
+
+[lib]
+name = "forge_cli"
+path = "src/lib.rs"
 
 [[bin]]
 name = "forge"

@@ -29,8 +29,8 @@ jobs:
             libayatana-appindicator3-dev
       - name: Dry-run package forge-app
         run: cargo publish --dry-run -p forge-app
-      - name: Verify forge-cli package file manifest
-        run: cargo package --list -p forge-cli --allow-dirty
+      - name: Verify forge-app-cli package file manifest
+        run: cargo package --list -p forge-app-cli --allow-dirty
 
   bundle-release:
     name: Build Release Bundles (${{ matrix.os }})
@@ -59,10 +59,10 @@ jobs:
             libayatana-appindicator3-dev \
             patchelf \
             dpkg-dev
-      - name: Build forge-cli and package reference workbench
+      - name: Build forge-app-cli and package reference workbench
         run: |
-          cargo build --release -p forge-cli
-          cargo run --release -p forge-cli -- build \
+          cargo build --release -p forge-app-cli
+          cargo run --release -p forge-app-cli -- build \
             --manifest-path examples/hello-forge/forge.toml \
             --runtime webview \
             --format all \
