@@ -20,7 +20,7 @@ pub(crate) mod cef;
 #[cfg(any(feature = "webview", feature = "cef"))]
 pub(crate) use windows::WindowSpec;
 pub use windows::{AppHandle, WindowHandle, WindowOptions};
-pub(crate) use windows::{HostCommand, HostEvent, WindowOp, WindowRegistry};
+pub(crate) use windows::{CloseDisposition, HostCommand, HostEvent, WindowOp, WindowRegistry};
 
 /// Engine-neutral HTTP-like request passed across the internal runtime seam.
 #[derive(Debug)]

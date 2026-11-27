@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::sandbox::Sandbox;
-use crate::{App, Error, ForgeError, Plugin, State};
+use crate::{App, Error, ForgeError, Meta, Plugin, RawBytes, State};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct FsPathReq {
@@ -69,9 +69,37 @@ impl Plugin for AppFsPlugin {
         })
         .command("fs.read_text", fs_read_text)
         .command("fs.write_text", fs_write_text)
+        .command("fs.read_bytes", fs_read_bytes)
+        .command("fs.write_bytes", fs_write_bytes)
         .command("fs.list_dir", fs_list_dir)
         .command("fs.remove_file", fs_remove_file)
     }
+}
+
+async fn fs_read_bytes(sandbox: State<Sandbox>, req: FsPathReq) -> Result<RawBytes, ForgeError> {
+    let path = req.path;
+    tokio::task::spawn_blocking(move || {
+        let canon = sandbox.resolve_existing_file(&path)?;
+        std::fs::read(&canon)
+            .map(RawBytes)
+            .map_err(ForgeError::from)
+    })
+    .await
+    .map_err(|e| ForgeError::internal("FS_TASK_FAILED", e.to_string()))?
+}
+
+async fn fs_write_bytes(
+    sandbox: State<Sandbox>,
+    Meta(req): Meta<FsPathReq>,
+    data: RawBytes,
+) -> Result<(), ForgeError> {
+    let path = req.path;
+    tokio::task::spawn_blocking(move || {
+        let target = sandbox.prepare_write_path(&path)?;
+        std::fs::write(&target, &data.0).map_err(ForgeError::from)
+    })
+    .await
+    .map_err(|e| ForgeError::internal("FS_TASK_FAILED", e.to_string()))?
 }
 
 async fn fs_read_text(sandbox: State<Sandbox>, req: FsPathReq) -> Result<String, ForgeError> {

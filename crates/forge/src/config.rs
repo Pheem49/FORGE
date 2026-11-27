@@ -10,9 +10,10 @@ use tar::Archive;
 
 use crate::error::{Error, Result};
 pub use crate::manifest::{
-    AppMetaConfig, BundleConfig, DevConfig, ExportedCommand, Manifest, MenuConfig, MenuItemConfig,
-    PermissionMode, PermissionsConfig, RuntimeConfig, RuntimeKind, SubmenuConfig, TrayConfig,
-    WindowConfig, WindowPermissionOverride,
+    AppMetaConfig, BundleConfig, CloseBehavior, DevConfig, ExportedCommand, MacOsSignConfig,
+    Manifest, MenuConfig, MenuItemConfig, PermissionMode, PermissionsConfig, RuntimeConfig,
+    RuntimeKind, SubmenuConfig, TrayConfig, UpdaterConfig, WindowConfig, WindowPermissionOverride,
+    WindowsSignConfig,
 };
 
 /// Resolved configuration for a FORGE application.
@@ -28,6 +29,7 @@ pub struct Config {
     pub tray: Option<TrayConfig>,
     pub menu: Option<MenuConfig>,
     pub bundle: BundleConfig,
+    pub updater: UpdaterConfig,
     #[serde(skip)]
     pub(crate) in_memory_assets: Option<HashMap<String, Vec<u8>>>,
     #[serde(skip)]
@@ -46,6 +48,7 @@ impl From<Manifest> for Config {
             tray: m.tray,
             menu: m.menu,
             bundle: m.bundle,
+            updater: m.updater,
             in_memory_assets: None,
             explicit_state_dir: None,
         }

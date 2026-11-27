@@ -11,7 +11,10 @@ use tokio::sync::mpsc;
 use crate::config::{Config, MenuConfig, TrayConfig};
 use crate::error::{ErrorKind, ForgeError, codes};
 use crate::kernel::ForgeKernel;
-use crate::runtime::{AppHandle, HostCommand, HostEvent, ProtocolRequest, WindowOp};
+use crate::runtime::{
+    AppHandle, CloseDisposition, HostCommand, HostEvent, ProtocolRequest, WindowOp,
+};
+use crate::single_instance::SecondInstancePayload;
 
 /// Observable HTTP-like response returned by [`HeadlessApp::get_asset`] and [`HeadlessApp::raw_exchange`].
 #[derive(Debug, Clone)]
@@ -92,7 +95,9 @@ impl HeadlessApp {
                 format!("failed to serialize payload: {e}"),
             )
         })?;
-        let raw = self.invoke_bytes(window_label, cmd, body).await?;
+        let raw = self
+            .invoke_ipc_raw(window_label, cmd, "application/json", None, body)
+            .await?;
         serde_json::from_slice::<R>(&raw).map_err(|e| {
             ForgeError::new(
                 codes::DESERIALIZE_ERROR,
@@ -108,10 +113,88 @@ impl HeadlessApp {
         self.invoke(cmd, Value::Null).await
     }
 
-    async fn invoke_bytes(
+    /// Invokes a binary command (`application/octet-stream` in -> `application/octet-stream` out) from `"main"`.
+    pub async fn invoke_raw(
+        &self,
+        cmd: &str,
+        bytes: impl Into<Vec<u8>>,
+    ) -> Result<Vec<u8>, ForgeError> {
+        self.invoke_raw_as("main", cmd, bytes).await
+    }
+
+    /// Invokes a binary command originating from `window_label`.
+    pub async fn invoke_raw_as(
         &self,
         window_label: &str,
         cmd: &str,
+        bytes: impl Into<Vec<u8>>,
+    ) -> Result<Vec<u8>, ForgeError> {
+        self.invoke_ipc_raw(
+            window_label,
+            cmd,
+            "application/octet-stream",
+            None,
+            bytes.into(),
+        )
+        .await
+    }
+
+    /// Invokes a binary command with a structured `X-Forge-Meta` JSON header (`Meta<M>`) and decodes a JSON reply.
+    pub async fn invoke_raw_with_meta<M, R>(
+        &self,
+        cmd: &str,
+        meta: M,
+        bytes: impl Into<Vec<u8>>,
+    ) -> Result<R, ForgeError>
+    where
+        M: Serialize,
+        R: DeserializeOwned,
+    {
+        let meta_json = serde_json::to_string(&meta).map_err(|e| {
+            ForgeError::bad_request(
+                codes::INVALID_PAYLOAD,
+                format!("failed to serialize meta header: {e}"),
+            )
+        })?;
+        let encoded_meta = format!("uri:{}", percent_encode_segment(&meta_json));
+        let raw = self
+            .invoke_ipc_raw(
+                "main",
+                cmd,
+                "application/octet-stream",
+                Some(&encoded_meta),
+                bytes.into(),
+            )
+            .await?;
+        serde_json::from_slice::<R>(&raw).map_err(|e| {
+            ForgeError::new(
+                codes::DESERIALIZE_ERROR,
+                format!("failed to deserialize command response: {e}"),
+            )
+        })
+    }
+
+    /// Invokes a command accepting a JSON payload (`P`) and returning raw binary bytes (`RawBytes`).
+    pub async fn invoke_json_to_raw<P>(&self, cmd: &str, payload: P) -> Result<Vec<u8>, ForgeError>
+    where
+        P: Serialize,
+    {
+        let body = serde_json::to_vec(&payload).map_err(|e| {
+            ForgeError::bad_request(
+                codes::INVALID_PAYLOAD,
+                format!("failed to serialize payload: {e}"),
+            )
+        })?;
+        self.invoke_ipc_raw("main", cmd, "application/json", None, body)
+            .await
+    }
+
+    async fn invoke_ipc_raw(
+        &self,
+        window_label: &str,
+        cmd: &str,
+        content_type: &'static str,
+        x_forge_meta: Option<&str>,
         body: Vec<u8>,
     ) -> Result<Vec<u8>, ForgeError> {
         let uri: Uri = format!(
@@ -122,13 +205,21 @@ impl HeadlessApp {
         .map_err(|e| ForgeError::bad_request(codes::INVALID_COMMAND, format!("{e}")))?;
 
         let mut headers = HeaderMap::new();
-        headers.insert("content-type", HeaderValue::from_static("application/json"));
+        headers.insert("content-type", HeaderValue::from_static(content_type));
         headers.insert(
             "x-forge-token",
             HeaderValue::from_str(&self.kernel.launch_token)
                 .map_err(|e| ForgeError::internal(codes::APP_ERROR, e.to_string()))?,
         );
         headers.insert("sec-fetch-site", HeaderValue::from_static("same-origin"));
+        if let Some(meta_val) = x_forge_meta {
+            headers.insert(
+                "x-forge-meta",
+                HeaderValue::from_str(meta_val).map_err(|e| {
+                    ForgeError::bad_request(codes::INVALID_PAYLOAD, format!("invalid meta: {e}"))
+                })?,
+            );
+        }
 
         let res = self
             .kernel
@@ -315,6 +406,72 @@ impl HeadlessApp {
             .is_some_and(|w| w.snapshot_state().maximized)
     }
 
+    /// Simulates a user clicking the native OS close button (`[X]`) on `window_label`.
+    pub fn request_close(&self, window_label: &str) {
+        if self.kernel.registry.request_close(window_label) == CloseDisposition::DestroyNow {
+            let should_exit = self.kernel.registry.handle_host_event(HostEvent::Closed {
+                label: window_label.to_string(),
+            });
+            if should_exit && let Ok(mut closed) = self.closed.lock() {
+                *closed = true;
+            }
+        }
+        self.drain_commands();
+    }
+
+    /// Simulates pressing a registered global shortcut `accelerator`.
+    pub fn trigger_shortcut(&self, accelerator: &str) {
+        let _ = self
+            .kernel
+            .registry
+            .handle_host_event(HostEvent::ShortcutTriggered {
+                accelerator: accelerator.to_string(),
+            });
+        self.drain_commands();
+    }
+
+    /// Simulates a macOS/OS URL open event (`tao::event::Event::Opened { urls }`).
+    pub fn simulate_urls_opened(&self, urls: Vec<String>) {
+        let _ = self
+            .kernel
+            .registry
+            .handle_host_event(HostEvent::UrlsOpened { urls });
+        self.drain_commands();
+    }
+
+    /// Simulates a secondary process launch forwarding CLI `args` and `cwd` over `SingleInstanceGuard`.
+    pub fn simulate_second_instance(&self, args: Vec<String>, cwd: std::path::PathBuf) {
+        let payload = SecondInstancePayload { args, cwd };
+        let app_handle = self.app_handle();
+        if let Some(main_win) = app_handle.window("main") {
+            main_win.show();
+            main_win.focus();
+        }
+        self.kernel.registry.dispatch_second_instance(&payload);
+        let _ = app_handle.emit_all("app:second-instance", payload);
+        self.drain_commands();
+    }
+
+    pub fn is_visible_for(&self, label: &str) -> bool {
+        self.drain_commands();
+        self.kernel
+            .registry
+            .window_handle(label)
+            .is_some_and(|w| w.snapshot_state().visible)
+    }
+
+    pub fn is_always_on_top(&self) -> bool {
+        self.is_always_on_top_for("main")
+    }
+
+    pub fn is_always_on_top_for(&self, label: &str) -> bool {
+        self.drain_commands();
+        self.kernel
+            .registry
+            .window_handle(label)
+            .is_some_and(|w| w.snapshot_state().always_on_top)
+    }
+
     pub fn is_fullscreen(&self) -> bool {
         self.drain_commands();
         self.kernel
@@ -357,6 +514,20 @@ impl HeadlessApp {
                 HostCommand::Window {
                     label,
                     op: WindowOp::Close,
+                } => {
+                    if self.kernel.registry.request_close(&label) == CloseDisposition::DestroyNow {
+                        let should_exit = self
+                            .kernel
+                            .registry
+                            .handle_host_event(HostEvent::Closed { label });
+                        if should_exit && let Ok(mut closed) = self.closed.lock() {
+                            *closed = true;
+                        }
+                    }
+                }
+                HostCommand::Window {
+                    label,
+                    op: WindowOp::Destroy,
                 } => {
                     let should_exit = self
                         .kernel

@@ -9,9 +9,9 @@ use serde_json::{Value, json};
 
 use super::ForgeKernel;
 use super::assets::percent_decode;
-use super::http::{json_error_response, json_ok_response};
+use super::http::{binary_ok_response, json_error_response, json_ok_response};
 use crate::error::{ForgeError, codes};
-use crate::handler::InvokeContext;
+use crate::handler::{InvokeContext, IpcBody};
 use crate::runtime::{AppHandle, ProtocolRequest, ProtocolResponse};
 use crate::util::constant_time_eq;
 
@@ -110,11 +110,23 @@ impl ForgeKernel {
             );
         };
 
-        let payload: Value = if req.body.is_empty() {
-            Value::Null
+        let is_octet_stream = req
+            .headers
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|ct| {
+                ct.split(';')
+                    .next()
+                    .is_some_and(|m| m.trim().eq_ignore_ascii_case("application/octet-stream"))
+            });
+
+        let ipc_body = if is_octet_stream {
+            IpcBody::Bytes(req.body)
+        } else if req.body.is_empty() {
+            IpcBody::Json(Value::Null)
         } else {
             match serde_json::from_slice(&req.body) {
-                Ok(v) => v,
+                Ok(v) => IpcBody::Json(v),
                 Err(err) => {
                     return json_error_response(
                         StatusCode::BAD_REQUEST,
@@ -133,11 +145,13 @@ impl ForgeKernel {
             config: Arc::clone(&self.config),
             app_handle: AppHandle::new(Arc::clone(&self.registry)),
             window,
+            headers: req.headers,
         };
 
-        let fut = command.call(ctx, payload);
+        let fut = command.call(ctx, ipc_body);
         match CatchUnwindFuture(fut).await {
-            Ok(Ok(reply_value)) => json_ok_response(&reply_value, csp),
+            Ok(Ok(IpcBody::Json(reply_value))) => json_ok_response(&reply_value, csp),
+            Ok(Ok(IpcBody::Bytes(reply_bytes))) => binary_ok_response(reply_bytes, csp),
             Ok(Err(forge_err)) => json_error_response(forge_err.status_code(), &forge_err, csp),
             Err(panic_payload) => {
                 let panic_msg = extract_panic_message(panic_payload);

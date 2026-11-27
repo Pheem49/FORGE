@@ -15,12 +15,13 @@ pub use http;
 pub use tokio;
 
 pub use config::{
-    AppConfig, AppMetaConfig, BundleConfig, Config, DevConfig, ExportedCommand, Manifest,
-    MenuConfig, MenuItemConfig, PermissionMode, PermissionsConfig, RuntimeConfig, RuntimeKind,
-    SubmenuConfig, TrayConfig, WindowConfig, WindowPermissionOverride,
+    AppConfig, AppMetaConfig, BundleConfig, CloseBehavior, Config, DevConfig, ExportedCommand,
+    MacOsSignConfig, Manifest, MenuConfig, MenuItemConfig, PermissionMode, PermissionsConfig,
+    RuntimeConfig, RuntimeKind, SubmenuConfig, TrayConfig, UpdaterConfig, WindowConfig,
+    WindowPermissionOverride, WindowsSignConfig,
 };
 pub use error::{Error, ErrorKind, ForgeError, Result, codes};
-pub use handler::{CommandHandler, FromContext, State};
+pub use handler::{CommandHandler, FromContext, Meta, RawBytes, State};
 pub use headless::{HeadlessApp, RawResponse};
 pub use runtime::{AppHandle, WindowHandle, WindowOptions};
 pub use single_instance::{AcquireOutcome, SecondInstancePayload, SingleInstanceGuard};
@@ -213,6 +214,7 @@ impl App {
                         main_win.show();
                         main_win.focus();
                     }
+                    app_handle.registry.dispatch_second_instance(&payload);
                     let _ = app_handle.emit_all("app:second-instance", payload);
                 },
             )? {
@@ -298,6 +300,14 @@ impl App {
         let mut config = Config::load_from_root(&self.root_dir)?;
         for hook in self.config_hooks {
             hook(&mut config);
+        }
+        for scheme in &config.app.schemes {
+            if let Err(msg) = manifest::validate_custom_scheme(scheme) {
+                return Err(Error::Config {
+                    path: None,
+                    message: msg,
+                });
+            }
         }
 
         let mut user_command_names: Vec<&'static str> = Vec::with_capacity(self.commands.len());

@@ -57,22 +57,40 @@
     return unlisten;
   }
 
-  async function invoke(command, payload) {
+  function isBinaryBuffer(val) {
+    return (
+      val instanceof Uint8Array ||
+      val instanceof ArrayBuffer ||
+      (typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView(val))
+    );
+  }
+
+  async function invoke(command, payload, meta) {
     if (typeof command !== "string" || command.length === 0) {
       const err = new Error("Command name must be a non-empty string");
       err.code = "FORGE_INVALID_COMMAND";
       throw err;
     }
+    const binary = isBinaryBuffer(payload);
+    const headers = {
+      "Content-Type": binary ? "application/octet-stream" : "application/json",
+      "X-Forge-Token": TOKEN
+    };
+    if (meta !== undefined) {
+      headers["X-Forge-Meta"] = "uri:" + encodeURIComponent(JSON.stringify(meta));
+    }
+    const body = binary
+      ? payload
+      : JSON.stringify(payload === undefined ? null : payload);
+
     const res = await fetch("/__forge_ipc/" + encodeURIComponent(command), {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Forge-Token": TOKEN
-      },
-      body: JSON.stringify(payload === undefined ? null : payload)
+      headers,
+      body
     });
-    const data = await res.json().catch(() => null);
+
     if (!res.ok) {
+      const data = await res.json().catch(() => null);
       const message = (data && data.message) || ("IPC failed with status " + res.status);
       const err = new Error(message);
       err.code = (data && data.code) || "APP_ERROR";
@@ -81,7 +99,17 @@
       }
       throw err;
     }
-    return data;
+
+    const ct = (res.headers.get("content-type") || "").toLowerCase();
+    if (ct.startsWith("application/octet-stream")) {
+      const buf = await res.arrayBuffer();
+      return new Uint8Array(buf);
+    }
+    return res.json().catch(() => null);
+  }
+
+  function invokeBytes(command, payload, meta) {
+    return invoke(command, payload, meta);
   }
 
   function emit(event, payload) {
@@ -99,10 +127,13 @@
   const windowApi = Object.freeze({
     label: WINDOW_LABEL,
     close: () => invoke("window.close"),
+    destroy: () => invoke("window.destroy"),
     minimize: (minimized = true) => invoke("window.minimize", { minimized }),
     maximize: (maximized) => invoke("window.maximize", maximized === undefined ? null : { maximized }),
     toggleFullscreen: (fullscreen) =>
       invoke("window.toggle_fullscreen", fullscreen === undefined ? null : { fullscreen }),
+    setAlwaysOnTop: (always_on_top = true) => invoke("window.set_always_on_top", { always_on_top }),
+    setOnClose: (on_close) => invoke("window.set_on_close", { on_close }),
     setTitle: (title) => invoke("window.set_title", { title }),
     show: () => invoke("window.show"),
     hide: () => invoke("window.hide"),
@@ -111,6 +142,30 @@
     create: (opts) => invoke("window.create", opts),
     list: () => invoke("window.list")
   });
+
+  function installUnifiedDragRegions() {
+    if (RUNTIME === "cef") {
+      const style = document.createElement("style");
+      style.setAttribute("data-forge-drag-style", "");
+      style.textContent =
+        "[data-forge-drag-region] { -webkit-app-region: drag; app-region: drag; user-select: none; }\n" +
+        "[data-forge-no-drag], [data-forge-drag-region] button, [data-forge-drag-region] input, " +
+        "[data-forge-drag-region] a, [data-forge-drag-region] select, [data-forge-drag-region] textarea { " +
+        "-webkit-app-region: no-drag; app-region: no-drag; }";
+      (document.head || document.documentElement).appendChild(style);
+    } else {
+      document.addEventListener("mousedown", (ev) => {
+        if (ev.button !== 0 || ev.detail !== 1) return;
+        const target = ev.target;
+        if (!(target instanceof Element)) return;
+        if (!target.closest("[data-forge-drag-region]")) return;
+        if (target.closest("button, input, a, select, textarea, [contenteditable='true'], [data-forge-no-drag]")) {
+          return;
+        }
+        windowApi.startDragging().catch(() => {});
+      });
+    }
+  }
 
   Object.defineProperty(window, "__forge_dispatch", {
     value: dispatch,
@@ -124,6 +179,7 @@
       runtime: RUNTIME,
       window: windowApi,
       invoke,
+      invokeBytes,
       listen,
       once,
       emit,
@@ -135,6 +191,7 @@
   });
 
   window.addEventListener("DOMContentLoaded", () => {
+    installUnifiedDragRegions();
     invoke("__forge_drain_events").then((queued) => {
       if (Array.isArray(queued)) {
         for (const [ev, payload] of queued) {

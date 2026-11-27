@@ -5,7 +5,7 @@ use std::sync::Arc;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::config::{AppConfig, RuntimeKind};
+use crate::config::{AppConfig, CloseBehavior, RuntimeKind};
 use crate::error::ForgeError;
 use crate::handler::{CommandEntry, CommandHandler, ErasedCommand};
 use crate::runtime::{AppHandle, WindowHandle, WindowOptions};
@@ -29,6 +29,16 @@ struct FullscreenReq {
 }
 
 #[derive(Debug, Deserialize)]
+struct AlwaysOnTopReq {
+    always_on_top: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct SetOnCloseReq {
+    on_close: CloseBehavior,
+}
+
+#[derive(Debug, Deserialize)]
 struct SetTitleReq {
     title: String,
 }
@@ -45,6 +55,8 @@ struct CreateWindowReq {
     resizable: Option<bool>,
     decorations: Option<bool>,
     visible: Option<bool>,
+    always_on_top: Option<bool>,
+    on_close: Option<CloseBehavior>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -64,9 +76,16 @@ struct EmitToReq {
 
 pub(crate) fn insert_builtin_commands(map: &mut HashMap<&'static str, Arc<dyn ErasedCommand>>) {
     register_default(map, "window.close", builtin_window_close);
+    register_default(map, "window.destroy", builtin_window_destroy);
     register_default(map, "window.minimize", builtin_window_minimize);
     register_default(map, "window.maximize", builtin_window_maximize);
     register_default(map, "window.toggle_fullscreen", builtin_window_fullscreen);
+    register_default(
+        map,
+        "window.set_always_on_top",
+        builtin_window_set_always_on_top,
+    );
+    register_default(map, "window.set_on_close", builtin_window_set_on_close);
     register_default(map, "window.set_title", builtin_window_set_title);
     register_default(map, "window.show", builtin_window_show);
     register_default(map, "window.hide", builtin_window_hide);
@@ -92,6 +111,27 @@ fn register_default<H, Marker>(
 
 async fn builtin_window_close(win: WindowHandle) -> Result<(), Infallible> {
     win.close_window();
+    Ok(())
+}
+
+async fn builtin_window_destroy(win: WindowHandle) -> Result<(), Infallible> {
+    win.destroy();
+    Ok(())
+}
+
+async fn builtin_window_set_always_on_top(
+    win: WindowHandle,
+    req: AlwaysOnTopReq,
+) -> Result<(), Infallible> {
+    win.set_always_on_top(req.always_on_top);
+    Ok(())
+}
+
+async fn builtin_window_set_on_close(
+    win: WindowHandle,
+    req: SetOnCloseReq,
+) -> Result<(), Infallible> {
+    win.set_on_close(req.on_close);
     Ok(())
 }
 
@@ -183,6 +223,12 @@ async fn builtin_window_create(app: AppHandle, req: CreateWindowReq) -> Result<S
     }
     if let Some(visible) = req.visible {
         opts = opts.visible(visible);
+    }
+    if let Some(always_on_top) = req.always_on_top {
+        opts = opts.always_on_top(always_on_top);
+    }
+    if let Some(on_close) = req.on_close {
+        opts = opts.on_close(on_close);
     }
 
     let handle = app.create_window(&req.label, opts)?;

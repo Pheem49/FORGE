@@ -49,6 +49,18 @@ pub(crate) fn plain_response(
     build_response(status, "text/plain; charset=utf-8", body, len, false, csp)
 }
 
+pub(crate) fn binary_ok_response(body: Vec<u8>, csp: &'static str) -> ProtocolResponse {
+    let len = body.len();
+    build_response(
+        StatusCode::OK,
+        "application/octet-stream",
+        body,
+        len,
+        true,
+        csp,
+    )
+}
+
 pub(crate) fn json_ok_response(value: &Value, csp: &'static str) -> ProtocolResponse {
     let body = serde_json::to_vec(value).unwrap_or_else(|_| b"null".to_vec());
     let len = body.len();

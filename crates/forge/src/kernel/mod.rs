@@ -1,4 +1,4 @@
-mod assets;
+pub(crate) mod assets;
 mod bootstrap;
 pub(crate) mod builtins;
 #[cfg(feature = "dev-tools")]

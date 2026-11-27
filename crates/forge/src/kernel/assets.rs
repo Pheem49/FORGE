@@ -148,7 +148,7 @@ pub(super) fn detect_mime(rel_path: &str) -> &'static str {
     }
 }
 
-pub(super) fn percent_decode(input: &str) -> String {
+pub(crate) fn percent_decode(input: &str) -> String {
     let bytes = input.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;

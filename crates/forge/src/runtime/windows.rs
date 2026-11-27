@@ -5,11 +5,27 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::mpsc;
 
-use crate::config::{Config, MenuConfig, RuntimeKind, TrayConfig, WindowConfig};
+use crate::config::{CloseBehavior, Config, MenuConfig, RuntimeKind, TrayConfig, WindowConfig};
 use crate::error::{ForgeError, codes};
+use crate::single_instance::SecondInstancePayload;
 use crate::window_state::{SavedWindowGeometry, WindowStateStore};
 
 const MAX_EARLY_EVENT_BUFFER: usize = 64;
+
+type SecondInstanceHook = Arc<dyn Fn(&SecondInstancePayload) + Send + Sync>;
+type UrlsOpenedHook = Arc<dyn Fn(&[String]) + Send + Sync>;
+type ShortcutHook = Arc<dyn Fn(&str) + Send + Sync>;
+
+/// Outcome when a native window close is requested (`[X]` button or `window.close()`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CloseDisposition {
+    /// Proceed with closing and destroying the window.
+    DestroyNow,
+    /// Cancel native close; the window was hidden instead (`on_close = "hide"`).
+    HideInstead,
+    /// Cancel native close; `window:close-requested` was emitted (`on_close = "emit"`).
+    EmitIntercepted,
+}
 
 /// Builder for opening additional windows dynamically via [`AppHandle::create_window`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,6 +42,8 @@ pub struct WindowOptions {
     pub resizable: bool,
     pub decorations: bool,
     pub visible: bool,
+    pub always_on_top: bool,
+    pub on_close: CloseBehavior,
     pub devtools: bool,
     pub remember_state: bool,
 }
@@ -57,6 +75,8 @@ impl WindowOptions {
             resizable: cfg.resizable,
             decorations: cfg.decorations,
             visible: cfg.visible,
+            always_on_top: cfg.always_on_top,
+            on_close: cfg.on_close,
             devtools: cfg.devtools,
             remember_state: cfg.remember_state,
         }
@@ -100,6 +120,16 @@ impl WindowOptions {
         self
     }
 
+    pub fn always_on_top(mut self, always_on_top: bool) -> Self {
+        self.always_on_top = always_on_top;
+        self
+    }
+
+    pub fn on_close(mut self, on_close: CloseBehavior) -> Self {
+        self.on_close = on_close;
+        self
+    }
+
     pub fn devtools(mut self, devtools: bool) -> Self {
         self.devtools = devtools;
         self
@@ -125,6 +155,8 @@ pub(crate) struct WindowSpec {
     pub resizable: bool,
     pub decorations: bool,
     pub visible: bool,
+    pub always_on_top: bool,
+    pub on_close: CloseBehavior,
     pub maximized: bool,
     pub devtools: bool,
     pub remember_state: bool,
@@ -144,6 +176,8 @@ impl WindowSpec {
             resizable: opts.resizable,
             decorations: opts.decorations,
             visible: opts.visible,
+            always_on_top: opts.always_on_top,
+            on_close: opts.on_close,
             maximized: false,
             devtools: opts.devtools,
             remember_state: opts.remember_state,
@@ -171,12 +205,14 @@ pub(crate) enum WindowOp {
     Minimize(bool),
     Maximize(bool),
     Fullscreen(bool),
+    AlwaysOnTop(bool),
     Show,
     Hide,
     Focus,
     Drag,
     Emit { event: String, payload_json: String },
     Close,
+    Destroy,
 }
 
 /// Commands dispatched from [`WindowRegistry`] to the active [`super::RuntimeHost`] adapter.
@@ -187,6 +223,9 @@ pub(crate) enum HostCommand {
     CreateWindow { label: String, spec: WindowSpec },
     SetTray(TrayConfig),
     SetMenu(MenuConfig),
+    RegisterShortcut(String),
+    UnregisterShortcut(String),
+    UnregisterAllShortcuts,
     Quit,
 }
 
@@ -221,6 +260,12 @@ pub(crate) enum HostEvent {
     TrayClicked {
         id: String,
     },
+    ShortcutTriggered {
+        accelerator: String,
+    },
+    UrlsOpened {
+        urls: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -234,6 +279,9 @@ pub(crate) struct ObservedWindowState {
     pub minimized: bool,
     pub maximized: bool,
     pub fullscreen: bool,
+    pub always_on_top: bool,
+    pub on_close: CloseBehavior,
+    pub force_closing: bool,
     pub early_events: VecDeque<(String, String)>,
     pub js_ready: bool,
 }
@@ -245,6 +293,8 @@ impl ObservedWindowState {
         let position = spec.x.zip(spec.y);
         let visible = spec.visible;
         let maximized = spec.maximized;
+        let always_on_top = spec.always_on_top;
+        let on_close = spec.on_close;
         Self {
             spec,
             title,
@@ -255,6 +305,9 @@ impl ObservedWindowState {
             minimized: false,
             maximized,
             fullscreen: false,
+            always_on_top,
+            on_close,
+            force_closing: false,
             early_events: VecDeque::new(),
             js_ready: false,
         }
@@ -279,7 +332,11 @@ struct RegistryInner {
     runtime_kind: RuntimeKind,
     is_headless: bool,
     exit_on_last_close: bool,
+    quitting: bool,
     state_store: Option<WindowStateStore>,
+    second_instance_hooks: Vec<SecondInstanceHook>,
+    urls_opened_hooks: Vec<UrlsOpenedHook>,
+    shortcut_hooks: Vec<ShortcutHook>,
 }
 
 /// Central in-process window and desktop UI coordinator shared by [`ForgeKernel`], [`AppHandle`],
@@ -348,7 +405,11 @@ impl WindowRegistry {
                 runtime_kind: config.runtime.default,
                 is_headless,
                 exit_on_last_close: config.app.exit_on_last_window_close,
+                quitting: false,
                 state_store,
+                second_instance_hooks: Vec::new(),
+                urls_opened_hooks: Vec::new(),
+                shortcut_hooks: Vec::new(),
             }),
             tx,
         });
@@ -463,8 +524,100 @@ impl WindowRegistry {
         });
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn send_host_command(&self, cmd: HostCommand) {
+        let _ = self.tx.send(cmd);
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn runtime_kind(&self) -> RuntimeKind {
+        self.inner
+            .lock()
+            .map(|g| g.runtime_kind)
+            .unwrap_or(RuntimeKind::Webview)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn is_headless(&self) -> bool {
+        self.inner.lock().is_ok_and(|g| g.is_headless)
+    }
+
     pub(crate) fn quit(&self) {
+        if let Ok(mut guard) = self.inner.lock() {
+            guard.quitting = true;
+        }
         let _ = self.tx.send(HostCommand::Quit);
+    }
+
+    /// Evaluates the configured [`CloseBehavior`] when a user clicks `[X]` or calls `window.close()`.
+    pub(crate) fn request_close(self: &Arc<Self>, label: &str) -> CloseDisposition {
+        let behavior = {
+            let Ok(guard) = self.inner.lock() else {
+                return CloseDisposition::DestroyNow;
+            };
+            if guard.quitting {
+                return CloseDisposition::DestroyNow;
+            }
+            let Some(st_arc) = guard.windows.get(label) else {
+                return CloseDisposition::DestroyNow;
+            };
+            let Ok(mut st) = st_arc.lock() else {
+                return CloseDisposition::DestroyNow;
+            };
+            if st.force_closing {
+                return CloseDisposition::DestroyNow;
+            }
+            if st.on_close == CloseBehavior::Hide {
+                st.visible = false;
+            }
+            st.on_close
+        };
+
+        match behavior {
+            CloseBehavior::Close => CloseDisposition::DestroyNow,
+            CloseBehavior::Hide => {
+                self.send_window_op(label, WindowOp::Hide);
+                CloseDisposition::HideInstead
+            }
+            CloseBehavior::Emit => {
+                if let Some(win) = self.window_handle(label) {
+                    let _ = win.emit("window:close-requested", json!({ "label": label }));
+                }
+                CloseDisposition::EmitIntercepted
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn register_second_instance_hook(&self, hook: SecondInstanceHook) {
+        if let Ok(mut guard) = self.inner.lock() {
+            guard.second_instance_hooks.push(hook);
+        }
+    }
+
+    pub(crate) fn dispatch_second_instance(&self, payload: &SecondInstancePayload) {
+        let hooks = self
+            .inner
+            .lock()
+            .map(|g| g.second_instance_hooks.clone())
+            .unwrap_or_default();
+        for hook in hooks {
+            hook(payload);
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn register_urls_opened_hook(&self, hook: UrlsOpenedHook) {
+        if let Ok(mut guard) = self.inner.lock() {
+            guard.urls_opened_hooks.push(hook);
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn register_shortcut_hook(&self, hook: ShortcutHook) {
+        if let Ok(mut guard) = self.inner.lock() {
+            guard.shortcut_hooks.push(hook);
+        }
     }
 
     pub(crate) fn tray(&self) -> Option<TrayConfig> {
@@ -519,7 +672,7 @@ impl WindowRegistry {
         Ok(())
     }
 
-    /// Processes a host-originated window, menu, or tray event, returning `true` if the application
+    /// Processes a host-originated window, menu, tray, or shortcut event, returning `true` if the application
     /// loop should now terminate (for example, `forge.quit` or closing the last open window).
     pub(crate) fn handle_host_event(self: &Arc<Self>, event: HostEvent) -> bool {
         match event {
@@ -565,10 +718,38 @@ impl WindowRegistry {
                 {
                     let _ = store.save(&label, st.to_saved_geometry());
                 }
-                guard.exit_on_last_close && guard.windows.is_empty()
+                (guard.quitting || guard.exit_on_last_close) && guard.windows.is_empty()
             }
             HostEvent::MenuClicked { id } => self.dispatch_action_id(&id, "menu:click"),
             HostEvent::TrayClicked { id } => self.dispatch_action_id(&id, "tray:click"),
+            HostEvent::UrlsOpened { urls } => {
+                let hooks = self
+                    .inner
+                    .lock()
+                    .map(|g| g.urls_opened_hooks.clone())
+                    .unwrap_or_default();
+                for hook in hooks {
+                    hook(&urls);
+                }
+                false
+            }
+            HostEvent::ShortcutTriggered { accelerator } => {
+                let hooks = self
+                    .inner
+                    .lock()
+                    .map(|g| g.shortcut_hooks.clone())
+                    .unwrap_or_default();
+                for hook in hooks {
+                    hook(&accelerator);
+                }
+                for lbl in self.window_labels() {
+                    if let Some(win) = self.window_handle(&lbl) {
+                        let _ =
+                            win.emit("shortcut:triggered", json!({ "accelerator": accelerator }));
+                    }
+                }
+                false
+            }
         }
     }
 
@@ -820,6 +1001,21 @@ impl WindowHandle {
             .send_window_op(&self.label, WindowOp::Fullscreen(fullscreen));
     }
 
+    pub fn set_always_on_top(&self, always_on_top: bool) {
+        if let Ok(mut guard) = self.state.lock() {
+            guard.always_on_top = always_on_top;
+        }
+        self.registry
+            .send_window_op(&self.label, WindowOp::AlwaysOnTop(always_on_top));
+    }
+
+    /// Updates the close interception policy (`CloseBehavior::Close | Hide | Emit`) at runtime.
+    pub fn set_on_close(&self, on_close: CloseBehavior) {
+        if let Ok(mut guard) = self.state.lock() {
+            guard.on_close = on_close;
+        }
+    }
+
     pub fn show(&self) {
         if let Ok(mut guard) = self.state.lock() {
             guard.visible = true;
@@ -845,8 +1041,17 @@ impl WindowHandle {
         self.registry.send_window_op(&self.label, WindowOp::Drag);
     }
 
+    /// Requests a polite window close, honoring the configured [`CloseBehavior`] (`close`, `hide`, or `emit`).
     pub fn close_window(&self) {
         self.registry.send_window_op(&self.label, WindowOp::Close);
+    }
+
+    /// Unconditionally destroys and closes this window, bypassing `on_close = "hide" | "emit"`.
+    pub fn destroy(&self) {
+        if let Ok(mut guard) = self.state.lock() {
+            guard.force_closing = true;
+        }
+        self.registry.send_window_op(&self.label, WindowOp::Destroy);
     }
 
     pub fn quit_app(&self) {

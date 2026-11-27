@@ -14,7 +14,8 @@ use crate::config::{MenuConfig, MenuItemConfig, TrayConfig};
 use crate::error::{Error, Result};
 use crate::kernel::ForgeKernel;
 use crate::runtime::{
-    HostCommand, HostEvent, ProtocolRequest, RuntimeHost, WindowOp, WindowSpec, emit_script,
+    CloseDisposition, HostCommand, HostEvent, ProtocolRequest, RuntimeHost, WindowOp, WindowSpec,
+    emit_script,
 };
 use crate::window_state::{MonitorBounds, SavedWindowGeometry};
 
@@ -22,6 +23,8 @@ enum LoopMessage {
     Host(HostCommand),
     #[cfg(feature = "desktop-ui")]
     MenuActivated(String),
+    #[cfg(feature = "plugin-shortcut")]
+    HotKeyPressed(u32),
 }
 
 pub(crate) struct WebViewHost;
@@ -42,6 +45,27 @@ impl RuntimeHost for WebViewHost {
             })));
         }
 
+        #[cfg(feature = "plugin-shortcut")]
+        let shortcut_stop = {
+            let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let stop_flag = Arc::clone(&stop);
+            let hk_proxy = event_loop.create_proxy();
+            std::thread::spawn(move || {
+                let rx = global_hotkey::GlobalHotKeyEvent::receiver();
+                while !stop_flag.load(std::sync::atomic::Ordering::SeqCst) {
+                    if let Ok(ev) = rx.recv_timeout(std::time::Duration::from_millis(50))
+                        && ev.state == global_hotkey::HotKeyState::Pressed
+                        && hk_proxy
+                            .send_event(LoopMessage::HotKeyPressed(ev.id))
+                            .is_err()
+                    {
+                        break;
+                    }
+                }
+            });
+            stop
+        };
+
         let forwarder = kernel.tokio_handle.spawn(async move {
             while let Some(cmd) = commands.recv().await {
                 if proxy.send_event(LoopMessage::Host(cmd)).is_err() {
@@ -56,6 +80,11 @@ impl RuntimeHost for WebViewHost {
         let mut active_tray: Option<tray_icon::TrayIcon> = None;
         #[cfg(feature = "desktop-ui")]
         let mut active_menus: Vec<muda::Menu> = Vec::new();
+        #[cfg(feature = "plugin-shortcut")]
+        let mut hotkey_mgr: Option<global_hotkey::GlobalHotKeyManager> = None;
+        #[cfg(feature = "plugin-shortcut")]
+        let mut active_hotkeys: HashMap<u32, (global_hotkey::hotkey::HotKey, String)> =
+            HashMap::new();
         let mut boot_error: Option<Error> = None;
 
         event_loop.run_return(|event, window_target, control_flow| {
@@ -63,6 +92,11 @@ impl RuntimeHost for WebViewHost {
 
             match event {
                 Event::NewEvents(StartCause::Init) => {
+                    #[cfg(feature = "plugin-shortcut")]
+                    if let Ok(mgr) = global_hotkey::GlobalHotKeyManager::new() {
+                        hotkey_mgr = Some(mgr);
+                    }
+
                     #[cfg(feature = "desktop-ui")]
                     if let Some(tray_cfg) = kernel.registry.tray()
                         && let Ok(t) = build_native_tray(&tray_cfg)
@@ -110,13 +144,16 @@ impl RuntimeHost for WebViewHost {
                     };
                     match event {
                         WindowEvent::CloseRequested => {
-                            id_to_label.remove(&window_id);
-                            windows.remove(&label);
-                            if kernel
-                                .registry
-                                .handle_host_event(HostEvent::Closed { label })
+                            if kernel.registry.request_close(&label) == CloseDisposition::DestroyNow
                             {
-                                *control_flow = ControlFlow::Exit;
+                                id_to_label.remove(&window_id);
+                                windows.remove(&label);
+                                if kernel
+                                    .registry
+                                    .handle_host_event(HostEvent::Closed { label })
+                                {
+                                    *control_flow = ControlFlow::Exit;
+                                }
                             }
                         }
                         WindowEvent::Resized(phys) => {
@@ -166,6 +203,16 @@ impl RuntimeHost for WebViewHost {
                         *control_flow = ControlFlow::Exit;
                     }
                 }
+                #[cfg(feature = "plugin-shortcut")]
+                Event::UserEvent(LoopMessage::HotKeyPressed(hk_id)) => {
+                    if let Some((_, accel)) = active_hotkeys.get(&hk_id) {
+                        let _ = kernel
+                            .registry
+                            .handle_host_event(HostEvent::ShortcutTriggered {
+                                accelerator: accel.clone(),
+                            });
+                    }
+                }
                 Event::UserEvent(LoopMessage::Host(cmd)) => match cmd {
                     HostCommand::CreateWindow { label, spec } => {
                         if !windows.contains_key(&label)
@@ -184,8 +231,22 @@ impl RuntimeHost for WebViewHost {
                             windows.insert(label, (win, wv));
                         }
                     }
-                    HostCommand::Window { label, op } => {
-                        if let WindowOp::Close = op {
+                    HostCommand::Window { label, op } => match op {
+                        WindowOp::Close => {
+                            if kernel.registry.request_close(&label) == CloseDisposition::DestroyNow
+                            {
+                                if let Some((win, _)) = windows.remove(&label) {
+                                    id_to_label.remove(&win.id());
+                                }
+                                if kernel
+                                    .registry
+                                    .handle_host_event(HostEvent::Closed { label })
+                                {
+                                    *control_flow = ControlFlow::Exit;
+                                }
+                            }
+                        }
+                        WindowOp::Destroy => {
                             if let Some((win, _)) = windows.remove(&label) {
                                 id_to_label.remove(&win.id());
                             }
@@ -195,12 +256,13 @@ impl RuntimeHost for WebViewHost {
                             {
                                 *control_flow = ControlFlow::Exit;
                             }
-                            return;
                         }
-                        if let Some((window, webview)) = windows.get(&label) {
-                            apply_window_op(window, webview, op);
+                        other => {
+                            if let Some((window, webview)) = windows.get(&label) {
+                                apply_window_op(window, webview, other);
+                            }
                         }
-                    }
+                    },
                     HostCommand::SetTray(tray_cfg) => {
                         #[cfg(feature = "desktop-ui")]
                         if let Ok(t) = build_native_tray(&tray_cfg) {
@@ -219,13 +281,63 @@ impl RuntimeHost for WebViewHost {
                         #[cfg(not(feature = "desktop-ui"))]
                         let _ = menu_cfg;
                     }
+                    HostCommand::RegisterShortcut(accelerator) => {
+                        #[cfg(feature = "plugin-shortcut")]
+                        if let Some(mgr) = &hotkey_mgr
+                            && let Ok(hk) = accelerator.parse::<global_hotkey::hotkey::HotKey>()
+                            && mgr.register(hk).is_ok()
+                        {
+                            active_hotkeys.insert(hk.id(), (hk, accelerator));
+                        }
+                        #[cfg(not(feature = "plugin-shortcut"))]
+                        let _ = accelerator;
+                    }
+                    HostCommand::UnregisterShortcut(accelerator) => {
+                        #[cfg(feature = "plugin-shortcut")]
+                        if let Ok(parsed) = accelerator.parse::<global_hotkey::hotkey::HotKey>()
+                            && let Some((hk, _)) = active_hotkeys.remove(&parsed.id())
+                            && let Some(mgr) = &hotkey_mgr
+                        {
+                            let _ = mgr.unregister(hk);
+                        }
+                        #[cfg(not(feature = "plugin-shortcut"))]
+                        let _ = accelerator;
+                    }
+                    HostCommand::UnregisterAllShortcuts =>
+                    {
+                        #[cfg(feature = "plugin-shortcut")]
+                        if let Some(mgr) = &hotkey_mgr {
+                            for (_, (hk, _)) in active_hotkeys.drain() {
+                                let _ = mgr.unregister(hk);
+                            }
+                        }
+                    }
                     HostCommand::Quit => {
                         *control_flow = ControlFlow::Exit;
                     }
                 },
+                Event::Opened { urls } => {
+                    let raw_urls: Vec<String> = urls.into_iter().map(|u| u.to_string()).collect();
+                    if !raw_urls.is_empty() {
+                        let _ = kernel
+                            .registry
+                            .handle_host_event(HostEvent::UrlsOpened { urls: raw_urls });
+                    }
+                }
                 _ => {}
             }
         });
+
+        #[cfg(feature = "plugin-shortcut")]
+        {
+            shortcut_stop.store(true, std::sync::atomic::Ordering::SeqCst);
+            if let Some(mgr) = &hotkey_mgr {
+                for (_, (hk, _)) in active_hotkeys.drain() {
+                    let _ = mgr.unregister(hk);
+                }
+            }
+            drop(hotkey_mgr);
+        }
 
         #[cfg(feature = "desktop-ui")]
         {
@@ -295,6 +407,7 @@ fn spawn_window(
         .with_inner_size(LogicalSize::new(geom.width, geom.height))
         .with_resizable(spec.resizable)
         .with_decorations(spec.decorations)
+        .with_always_on_top(spec.always_on_top)
         .with_maximized(geom.maximized)
         .with_visible(spec.visible);
 
@@ -408,6 +521,9 @@ fn apply_window_op(window: &Window, webview: &WebView, op: WindowOp) {
             };
             window.set_fullscreen(mode);
         }
+        WindowOp::AlwaysOnTop(on_top) => {
+            window.set_always_on_top(on_top);
+        }
         WindowOp::Show => {
             window.set_visible(true);
         }
@@ -428,7 +544,7 @@ fn apply_window_op(window: &Window, webview: &WebView, op: WindowOp) {
                 let _ = webview.evaluate_script(&script);
             }
         }
-        WindowOp::Close => {}
+        WindowOp::Close | WindowOp::Destroy => {}
     }
 }
 

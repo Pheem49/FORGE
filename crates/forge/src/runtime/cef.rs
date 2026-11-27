@@ -5,14 +5,16 @@ use std::sync::{Arc, Mutex};
 
 use cef::{
     App, Browser, BrowserSettings, BrowserView, Callback, CefString, CefStringMultimap, Client,
-    CommandLine, Frame, ImplApp, ImplBrowser, ImplCallback, ImplClient, ImplCommandLine, ImplFrame,
-    ImplLifeSpanHandler, ImplPanel, ImplPanelDelegate, ImplPostData, ImplPostDataElement,
-    ImplRequest, ImplResourceHandler, ImplResponse, ImplSchemeHandlerFactory, ImplSchemeRegistrar,
-    ImplTask, ImplView, ImplViewDelegate, ImplWindow, ImplWindowDelegate, LifeSpanHandler,
-    LogSeverity, Point, PostDataElement, Rect, Request, ResourceHandler, ResourceReadCallback,
-    Response, SchemeHandlerFactory, SchemeOptions, SchemeRegistrar, Settings, Size, Task, ThreadId,
-    View, Window, WindowDelegate, WrapApp, WrapClient, WrapLifeSpanHandler, WrapResourceHandler,
-    WrapSchemeHandlerFactory, WrapTask, WrapWindowDelegate, args::Args, rc::Rc,
+    CommandLine, DragHandler, DraggableRegion, Frame, ImplApp, ImplBrowser, ImplCallback,
+    ImplClient, ImplCommandLine, ImplDragHandler, ImplFrame, ImplLifeSpanHandler, ImplPanel,
+    ImplPanelDelegate, ImplPostData, ImplPostDataElement, ImplRequest, ImplResourceHandler,
+    ImplResponse, ImplSchemeHandlerFactory, ImplSchemeRegistrar, ImplTask, ImplView,
+    ImplViewDelegate, ImplWindow, ImplWindowDelegate, LifeSpanHandler, LogSeverity, Point,
+    PostDataElement, Rect, Request, ResourceHandler, ResourceReadCallback, Response,
+    SchemeHandlerFactory, SchemeOptions, SchemeRegistrar, Settings, Size, Task, ThreadId, View,
+    Window, WindowDelegate, WrapApp, WrapClient, WrapDragHandler, WrapLifeSpanHandler,
+    WrapResourceHandler, WrapSchemeHandlerFactory, WrapTask, WrapWindowDelegate, args::Args,
+    rc::Rc,
 };
 use http::header::{CONTENT_TYPE, HeaderName, HeaderValue};
 use http::{HeaderMap, Method, Uri};
@@ -22,8 +24,8 @@ use tokio::task::AbortHandle;
 use crate::error::{Error, Result};
 use crate::kernel::ForgeKernel;
 use crate::runtime::{
-    HostCommand, HostEvent, ProcessDisposition, ProtocolRequest, ProtocolResponse, RuntimeHost,
-    WindowOp, WindowSpec, emit_script,
+    CloseDisposition, HostCommand, HostEvent, ProcessDisposition, ProtocolRequest,
+    ProtocolResponse, RuntimeHost, WindowOp, WindowSpec, emit_script,
 };
 
 struct CefWindowEntry {
@@ -140,7 +142,8 @@ fn create_views_window(
     spec: &WindowSpec,
 ) -> Result<()> {
     let life_span = ForgeLifeSpanHandler::new(label.to_string(), Arc::clone(host_state));
-    let mut client = ForgeClient::new(life_span);
+    let drag_handler = ForgeDragHandler::new(label.to_string(), Arc::clone(host_state));
+    let mut client = ForgeClient::new(life_span, drag_handler);
     let browser_settings = BrowserSettings::default();
     let clean_path = spec.url.trim_start_matches('/');
     let rel = if clean_path.is_empty() {
@@ -300,6 +303,9 @@ cef::wrap_window_delegate! {
                 win.center_window(Some(&size));
             }
 
+            if self.spec.always_on_top {
+                win.set_always_on_top(1);
+            }
             if self.spec.visible {
                 win.show();
             }
@@ -364,7 +370,32 @@ cef::wrap_window_delegate! {
         }
 
         fn can_close(&self, _window: Option<&mut Window>) -> c_int {
-            1
+            c_int::from(
+                self.kernel.registry.request_close(&self.label) == CloseDisposition::DestroyNow,
+            )
+        }
+    }
+}
+
+cef::wrap_drag_handler! {
+    struct ForgeDragHandler {
+        label: String,
+        host_state: Arc<Mutex<CefHostState>>,
+    }
+
+    impl DragHandler {
+        fn on_draggable_regions_changed(
+            &self,
+            _browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            regions: Option<&[DraggableRegion]>,
+        ) {
+            if frame.is_some_and(|f| f.is_main() != 0)
+                && let Ok(guard) = self.host_state.lock()
+                && let Some(entry) = guard.windows.get(&self.label)
+            {
+                entry.window.set_draggable_regions(regions);
+            }
         }
     }
 }
@@ -401,11 +432,16 @@ cef::wrap_life_span_handler! {
 cef::wrap_client! {
     struct ForgeClient {
         life_span: LifeSpanHandler,
+        drag_handler: DragHandler,
     }
 
     impl Client {
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
             Some(self.life_span.clone())
+        }
+
+        fn drag_handler(&self) -> Option<DragHandler> {
+            Some(self.drag_handler.clone())
         }
     }
 }
@@ -471,6 +507,9 @@ cef::wrap_task! {
                         WindowOp::Fullscreen(fullscreen) => {
                             window.set_fullscreen(c_int::from(*fullscreen));
                         }
+                        WindowOp::AlwaysOnTop(on_top) => {
+                            window.set_always_on_top(c_int::from(*on_top));
+                        }
                         WindowOp::Show => {
                             window.show();
                         }
@@ -493,12 +532,16 @@ cef::wrap_task! {
                                 frame.execute_java_script(Some(&script), None, 0);
                             }
                         }
-                        WindowOp::Close => {
+                        WindowOp::Close | WindowOp::Destroy => {
                             window.close();
                         }
                     }
                 }
-                HostCommand::SetTray(_) | HostCommand::SetMenu(_) => {}
+                HostCommand::SetTray(_)
+                | HostCommand::SetMenu(_)
+                | HostCommand::RegisterShortcut(_)
+                | HostCommand::UnregisterShortcut(_)
+                | HostCommand::UnregisterAllShortcuts => {}
                 HostCommand::Quit => {
                     let windows: Vec<Window> = self
                         .host_state
@@ -707,7 +750,12 @@ fn extract_protocol_request(req: &mut Request, window_label: String) -> Protocol
     let method = Method::from_bytes(raw_method.as_bytes()).unwrap_or(Method::GET);
 
     let mut headers = HeaderMap::new();
-    for name in ["x-forge-token", "content-type", "sec-fetch-site"] {
+    for name in [
+        "x-forge-token",
+        "content-type",
+        "sec-fetch-site",
+        "x-forge-meta",
+    ] {
         let userfree = req.header_by_name(Some(&CefString::from(name)));
         let val_str = CefString::from(&userfree).to_string();
         if !val_str.is_empty()
